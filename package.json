@@ -1,0 +1,16 @@
+{
+  "name": "pi-elixir",
+  "version": "0.1.0",
+  "description": "BEAM runtime tools for pi — connects to the running Elixir app via Tidewave",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./extensions/index.ts"],
+    "skills": ["./skills"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  }
+}
