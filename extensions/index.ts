@@ -12,6 +12,10 @@ import { callTool, isReachable } from "./tidewave-client.ts";
 
 const DEFAULT_URL = "http://localhost:4000/tidewave/mcp";
 
+function getTidewaveUrl(): string {
+	return process.env.TIDEWAVE_URL || DEFAULT_URL;
+}
+
 function truncated(text: string) {
 	const t = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
 	if (!t.truncated) return t.content;
@@ -28,7 +32,6 @@ interface BridgeToolOpts {
 
 function bridgeTool(
 	pi: ExtensionAPI,
-	url: string,
 	name: string,
 	mcpName: string,
 	label: string,
@@ -43,6 +46,21 @@ function bridgeTool(
 		description,
 		parameters,
 		async execute(_id, params, signal) {
+			const url = getTidewaveUrl();
+			const reachable = await isReachable(url);
+			if (!reachable) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `BEAM not reachable at ${url}. Start the Phoenix server with \`mix phx.server\` and ensure Tidewave is installed.`,
+						},
+					],
+					isError: true,
+					details: {},
+				};
+			}
+
 			let { text, isError } = await callTool(url, mcpName, params, signal);
 			if (opts?.transformResult) text = opts.transformResult(text);
 			return {
@@ -56,15 +74,13 @@ function bridgeTool(
 	});
 }
 
-function renderElixirResult(result: any, { expanded }: any, theme: any) {
+function renderElixirResult(result: any, _options: any, _theme: any) {
 	const text = result.content?.[0]?.text ?? "";
 	if (!text || result.isError) return new Text(text, 0, 0);
-
-	const highlighted = highlightCode(text, "elixir");
-	return new Text(highlighted.join("\n"), 0, 0);
+	return new Text(highlightCode(text, "elixir").join("\n"), 0, 0);
 }
 
-function renderMarkdownResult(result: any, { expanded }: any, theme: any) {
+function renderMarkdownResult(result: any, _options: any, theme: any) {
 	const text = result.content?.[0]?.text ?? "";
 	if (!text || result.isError) return new Text(text, 0, 0);
 
@@ -80,8 +96,7 @@ function renderMarkdownResult(result: any, { expanded }: any, theme: any) {
 			codeLang = fenceMatch[1] || "elixir";
 			codeBuffer = [];
 		} else if (line.startsWith("```") && inCodeBlock) {
-			const highlighted = highlightCode(codeBuffer.join("\n"), codeLang);
-			lines.push(...highlighted);
+			lines.push(...highlightCode(codeBuffer.join("\n"), codeLang));
 			inCodeBlock = false;
 		} else if (inCodeBlock) {
 			codeBuffer.push(line);
@@ -101,10 +116,24 @@ function renderMarkdownResult(result: any, { expanded }: any, theme: any) {
 	return new Text(lines.join("\n"), 0, 0);
 }
 
-function renderSqlResult(result: any, _options: any, theme: any) {
+function renderSqlResult(result: any, _options: any, _theme: any) {
 	const text = result.content?.[0]?.text ?? "";
 	if (!text || result.isError) return new Text(text, 0, 0);
 	return new Text(highlightCode(text, "elixir").join("\n"), 0, 0);
+}
+
+function renderLogResult(result: any, _options: any, theme: any) {
+	const text = result.content?.[0]?.text ?? "";
+	if (!text || result.isError) return new Text(text, 0, 0);
+
+	const lines = text.split("\n").map((line: string) => {
+		if (/\[error\]/i.test(line)) return theme.fg("error", line);
+		if (/\[warn(ing)?\]/i.test(line)) return theme.fg("warning", line);
+		if (/\[debug\]/i.test(line)) return theme.fg("dim", line);
+		return line;
+	});
+
+	return new Text(lines.join("\n"), 0, 0);
 }
 
 function formatHexSearchResults(raw: string): string {
@@ -126,9 +155,6 @@ function formatHexSearchResults(raw: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
-	const url = DEFAULT_URL;
-	let connected = false;
-
 	function isElixirProject(cwd: string): boolean {
 		try {
 			const fs = require("node:fs");
@@ -141,7 +167,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (!isElixirProject(ctx.cwd)) return;
 
-		connected = await isReachable(url);
+		const url = getTidewaveUrl();
+		const connected = await isReachable(url);
 		const t = ctx.ui.theme;
 		ctx.ui.setStatus(
 			"elixir",
@@ -153,7 +180,6 @@ export default function (pi: ExtensionAPI) {
 
 	bridgeTool(
 		pi,
-		url,
 		"elixir_eval",
 		"project_eval",
 		"Elixir Eval",
@@ -182,7 +208,6 @@ Output truncated to ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)
 
 	bridgeTool(
 		pi,
-		url,
 		"elixir_docs",
 		"get_docs",
 		"Elixir Docs",
@@ -206,7 +231,6 @@ Accepts: Module, Module.function, Module.function/arity, c:Module.callback/arity
 
 	bridgeTool(
 		pi,
-		url,
 		"elixir_source",
 		"get_source_location",
 		"Elixir Source",
@@ -229,7 +253,6 @@ Prefer over grep when you know the module/function name.`,
 
 	bridgeTool(
 		pi,
-		url,
 		"elixir_sql",
 		"execute_sql_query",
 		"Elixir SQL",
@@ -254,7 +277,6 @@ Use to verify migrations, check data, introspect schema.`,
 
 	bridgeTool(
 		pi,
-		url,
 		"elixir_logs",
 		"get_logs",
 		"Elixir Logs",
@@ -271,11 +293,11 @@ Use to verify migrations, check data, introspect schema.`,
 			if (args.level) text += theme.fg("dim", ` level=${args.level}`);
 			return new Text(text, 0, 0);
 		},
+		{ renderResult: renderLogResult },
 	);
 
 	bridgeTool(
 		pi,
-		url,
 		"elixir_hex_search",
 		"search_package_docs",
 		"HexDocs Search",
@@ -294,7 +316,6 @@ Use to verify migrations, check data, introspect schema.`,
 
 	bridgeTool(
 		pi,
-		url,
 		"elixir_schemas",
 		"get_ecto_schemas",
 		"Ecto Schemas",

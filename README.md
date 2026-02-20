@@ -7,7 +7,7 @@ LLMs already know how to run `mix compile` and `mix test`. What they don't know 
 ## Install
 
 ```sh
-pi install /path/to/pi-elixir
+pi install github:dannote/pi-elixir
 ```
 
 ### Prerequisites
@@ -28,6 +28,14 @@ end
 
 Start `mix phx.server`. The extension auto-detects the running app.
 
+## Configuration
+
+By default the extension connects to `http://localhost:4000/tidewave/mcp`. Override with:
+
+```sh
+export TIDEWAVE_URL=http://localhost:4001/tidewave/mcp
+```
+
 ## What's Included
 
 ### Extension — Tidewave Bridge
@@ -43,6 +51,10 @@ Bridges 7 Tidewave MCP tools into pi as native tools:
 | `elixir_logs` | `get_logs` | Server logs with level/grep filtering |
 | `elixir_hex_search` | `search_package_docs` | HexDocs search scoped to your mix.lock |
 | `elixir_schemas` | `get_ecto_schemas` | List all Ecto schemas with paths |
+
+Tool results are syntax-highlighted: Elixir output, SQL results, documentation with code blocks, and log levels are all color-coded in the TUI.
+
+When the BEAM is unreachable, tools return a clear error message instead of a cryptic connection failure.
 
 ### Skill — BEAM Introspection
 
