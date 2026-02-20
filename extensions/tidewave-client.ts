@@ -18,19 +18,36 @@ export async function callTool(
 ): Promise<{ text: string; isError: boolean }> {
 	const id = ++requestId;
 
-	const resp = await fetch(url, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
-			jsonrpc: "2.0",
-			id,
-			method: "tools/call",
-			params: { name, arguments: args },
-		}),
-		signal,
-	});
+	let resp: Response;
+	try {
+		resp = await fetch(url, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id,
+				method: "tools/call",
+				params: { name, arguments: args },
+			}),
+			signal,
+		});
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return {
+			text: `Could not reach BEAM at ${url} (${msg}). Is the Phoenix server running?`,
+			isError: true,
+		};
+	}
 
-	const json: JsonRpcResponse = await resp.json();
+	let json: JsonRpcResponse;
+	try {
+		json = await resp.json();
+	} catch {
+		return {
+			text: `BEAM returned invalid response (HTTP ${resp.status}). The server may be starting up or misconfigured.`,
+			isError: true,
+		};
+	}
 
 	if (json.error) {
 		return { text: `MCP error ${json.error.code}: ${json.error.message}`, isError: true };
