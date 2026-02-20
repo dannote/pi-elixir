@@ -51,7 +51,18 @@ export default function (pi: ExtensionAPI) {
 	const url = DEFAULT_URL;
 	let connected = false;
 
+	function isElixirProject(cwd: string): boolean {
+		try {
+			const fs = require("node:fs");
+			return fs.existsSync(`${cwd}/mix.exs`);
+		} catch {
+			return false;
+		}
+	}
+
 	pi.on("session_start", async (_event, ctx) => {
+		if (!isElixirProject(ctx.cwd)) return;
+
 		connected = await isReachable(url);
 		const t = ctx.ui.theme;
 		ctx.ui.setStatus(
