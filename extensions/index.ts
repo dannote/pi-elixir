@@ -323,4 +323,539 @@ Use to verify migrations, check data, introspect schema.`,
 		Type.Object({}),
 		(_args, theme) => new Text(theme.fg("toolTitle", theme.bold("elixir_schemas")), 0, 0),
 	);
+
+	// --- Eval-based introspection tools ---
+	// These send Elixir code through project_eval to provide structured BEAM introspection.
+
+	function evalTool(
+		name: string,
+		label: string,
+		description: string,
+		parameters: ReturnType<typeof Type.Object>,
+		buildCode: (params: Record<string, unknown>) => string,
+		renderCall: (args: Record<string, unknown>, theme: any) => any,
+		opts?: BridgeToolOpts,
+	) {
+		pi.registerTool({
+			name,
+			label,
+			description,
+			parameters,
+			async execute(_id, params, signal) {
+				const url = getTidewaveUrl();
+				const reachable = await isReachable(url);
+				if (!reachable) {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: `BEAM not reachable at ${url}. Start the Phoenix server with \`mix phx.server\` and ensure Tidewave is installed.`,
+							},
+						],
+						isError: true,
+						details: {},
+					};
+				}
+
+				const code = buildCode(params);
+				let { text, isError } = await callTool(url, "project_eval", { code }, signal);
+				if (opts?.transformResult) text = opts.transformResult(text);
+				return {
+					content: [{ type: "text" as const, text: truncated(text) }],
+					isError,
+					details: {},
+				};
+			},
+			renderCall,
+			renderResult: opts?.renderResult,
+		});
+	}
+
+	evalTool(
+		"elixir_sup_tree",
+		"Supervision Tree",
+		`Show the supervision tree of the running application.
+Returns a tree of supervisors and their children with PIDs, restart strategies, and child types.
+Use to understand application architecture and process hierarchy.`,
+		Type.Object({
+			root: Type.Optional(
+				Type.String({
+					description:
+						"Root supervisor module (default: auto-detected application supervisor). e.g. MyApp.Supervisor",
+				}),
+			),
+			depth: Type.Optional(
+				Type.Integer({ description: "Maximum tree depth to display (default: unlimited)" }),
+			),
+		}),
+		(params) => {
+			const root = params.root ? String(params.root) : null;
+			const depth = params.depth != null ? Number(params.depth) : null;
+			const depthGuard = depth != null ? `depth < ${depth}` : "true";
+			return `
+defmodule PiSupTree do
+  def print(sup, depth \\\\ 0) do
+    indent = String.duplicate("  ", depth)
+    children = try do
+      Supervisor.which_children(sup)
+    rescue
+      _ -> []
+    end
+
+    children
+    |> Enum.map(fn {id, pid, type, modules} ->
+      id_str = if is_atom(id), do: inspect(id), else: "\#{inspect(id)}"
+      pid_str = case pid do
+        p when is_pid(p) -> inspect(p)
+        :restarting -> "restarting"
+        :undefined -> "undefined"
+      end
+      mod_str = case modules do
+        :dynamic -> "dynamic"
+        [m] -> inspect(m)
+        ms -> inspect(ms)
+      end
+
+      line = "\#{indent}├─ \#{id_str} [\#{type}] \#{pid_str} (\#{mod_str})"
+
+      sub = if type == :supervisor and is_pid(pid) and ${depthGuard} do
+        try do
+          info = Supervisor.count_children(pid)
+          strategy = case :sys.get_status(pid) do
+            {:status, _, _, [_, _, _, _, [header | _]]} ->
+              case header do
+                {_, _, {:data, data}} -> Keyword.get(data, :strategy, :unknown)
+                _ -> :unknown
+              end
+            _ -> :unknown
+          end
+          header = "\#{indent}│  strategy=\#{strategy} active=\#{info[:active]} specs=\#{info[:specs]}"
+          header <> "\\n" <> print(pid, depth + 1)
+        rescue
+          _ -> ""
+        end
+      else
+        ""
+      end
+
+      if sub != "", do: line <> "\\n" <> sub, else: line
+    end)
+    |> Enum.join("\\n")
+  end
+end
+
+root = ${root ? `Module.concat([${root.split(".").map((s) => `:"${s}"`).join(", ")}])` : `
+  case Application.started_applications() |> Enum.find(fn {app, _, _} ->
+    app_modules = case :application.get_key(app, :modules) do
+      {:ok, mods} -> mods
+      _ -> []
+    end
+    Enum.any?(app_modules, fn m -> String.contains?(inspect(m), "Supervisor") end) and
+    app not in [:kernel, :stdlib, :elixir, :logger, :phoenix, :ecto, :postgrex, :telemetry, :tidewave, :bandit, :plug]
+  end) do
+    {app, _, _} ->
+      children = Application.spec(app, :mod)
+      case children do
+        {mod, _} -> mod
+        _ -> nil
+      end
+    nil -> nil
+  end
+`}
+
+case root do
+  nil -> "Could not auto-detect application supervisor. Pass root=MyApp.Supervisor explicitly."
+  mod ->
+    strategy = try do
+      case :sys.get_status(Process.whereis(mod) || mod) do
+        {:status, _, _, [_, _, _, _, [header | _]]} ->
+          case header do
+            {_, _, {:data, data}} -> Keyword.get(data, :strategy, :unknown)
+            _ -> :unknown
+          end
+        _ -> :unknown
+      end
+    rescue
+      _ -> :unknown
+    end
+    header = "#{inspect(mod)} (strategy=#{strategy})\\n"
+    header <> PiSupTree.print(Process.whereis(mod) || mod)
+end
+`;
+		},
+		(args, theme) => {
+			let text = theme.fg("toolTitle", theme.bold("elixir_sup_tree"));
+			if (args.root) text += theme.fg("accent", ` ${args.root}`);
+			if (args.depth) text += theme.fg("muted", ` depth=${args.depth}`);
+			return new Text(text, 0, 0);
+		},
+		{ renderResult: renderElixirResult },
+	);
+
+	evalTool(
+		"elixir_top",
+		"Process Top",
+		`List top BEAM processes by resource usage, like a process manager.
+Shows process name/MFA, PID, memory, message queue length, reductions, and current function.
+Use to find memory leaks, overloaded mailboxes, or busy processes.`,
+		Type.Object({
+			sort: Type.Optional(
+				Type.String({
+					description: "Sort by: memory (default), reductions, message_queue_len",
+				}),
+			),
+			limit: Type.Optional(Type.Integer({ description: "Number of processes to show (default: 15)" })),
+		}),
+		(params) => {
+			const sort = params.sort ? String(params.sort) : "memory";
+			const limit = params.limit != null ? Number(params.limit) : 15;
+			return `
+sort_key = :${sort}
+limit = ${limit}
+
+Process.list()
+|> Enum.map(fn pid ->
+  info = Process.info(pid, [:registered_name, :memory, :message_queue_len, :reductions, :current_function, :initial_call, :dictionary])
+  case info do
+    nil -> nil
+    info ->
+      name = case info[:registered_name] do
+        [] -> nil
+        n -> n
+      end
+      init_call = case info[:dictionary][:"$initial_call"] do
+        {m, f, a} -> "\#{inspect(m)}.\#{f}/\#{a}"
+        _ -> case info[:initial_call] do
+          {m, f, a} -> "\#{inspect(m)}.\#{f}/\#{a}"
+          _ -> nil
+        end
+      end
+      current = case info[:current_function] do
+        {m, f, a} -> "\#{inspect(m)}.\#{f}/\#{a}"
+        _ -> "?"
+      end
+      label = cond do
+        name -> inspect(name)
+        init_call -> init_call
+        true -> inspect(pid)
+      end
+      %{
+        pid: inspect(pid),
+        name: label,
+        memory: info[:memory],
+        message_queue_len: info[:message_queue_len],
+        reductions: info[:reductions],
+        current: current
+      }
+  end
+end)
+|> Enum.reject(&is_nil/1)
+|> Enum.sort_by(& &1[sort_key], :desc)
+|> Enum.take(limit)
+|> Enum.with_index(1)
+|> Enum.map(fn {p, i} ->
+  mem = cond do
+    p.memory >= 1_048_576 -> "\#{Float.round(p.memory / 1_048_576, 1)} MB"
+    p.memory >= 1024 -> "\#{Float.round(p.memory / 1024, 1)} KB"
+    true -> "\#{p.memory} B"
+  end
+  rank = String.pad_leading("\#{i}", 3)
+  "\#{rank}. \#{p.pid} \#{String.pad_trailing(p.name, 48)} mem=\#{String.pad_leading(mem, 10)} msgq=\#{String.pad_leading("\#{p.message_queue_len}", 6)} reds=\#{p.reductions}"
+end)
+|> Enum.join("\\n")
+`;
+		},
+		(args, theme) => {
+			let text = theme.fg("toolTitle", theme.bold("elixir_top"));
+			if (args.sort) text += theme.fg("muted", ` sort=${args.sort}`);
+			if (args.limit) text += theme.fg("muted", ` limit=${args.limit}`);
+			return new Text(text, 0, 0);
+		},
+	);
+
+	evalTool(
+		"elixir_process_info",
+		"Process Info",
+		`Get detailed information about a specific BEAM process.
+Accepts a registered name (e.g. MyApp.Repo) or PID string (e.g. "0.500.0").
+Returns: state, message queue, memory, reductions, links, monitors, current function, and more.`,
+		Type.Object({
+			process: Type.String({
+				description:
+					'Registered process name (e.g. MyApp.Repo, Elixir.MyApp.Repo) or PID (e.g. "0.500.0")',
+			}),
+		}),
+		(params) => {
+			const proc = String(params.process);
+			return `
+target = ${
+				proc.match(/^\d+\.\d+\.\d+$/)
+					? `:erlang.list_to_pid(~c"<${proc}>")`
+					: `Process.whereis(Module.concat([${proc.split(".").map((s) => `:"${s}"`).join(", ")}]))`
+			}
+
+case target do
+  nil -> "Process not found: ${proc}"
+  pid when is_pid(pid) ->
+    info = Process.info(pid, [
+      :registered_name, :memory, :message_queue_len, :messages, :reductions,
+      :current_function, :initial_call, :status, :links, :monitors, :monitored_by,
+      :trap_exit, :dictionary, :heap_size, :stack_size, :total_heap_size
+    ])
+    case info do
+      nil -> "Process \#{inspect(pid)} is dead"
+      info ->
+        name = case info[:registered_name] do
+          [] -> "none"
+          n -> inspect(n)
+        end
+        init = case info[:dictionary][:"$initial_call"] do
+          {m, f, a} -> "\#{inspect(m)}.\#{f}/\#{a}"
+          _ -> case info[:initial_call] do
+            {m, f, a} -> "\#{inspect(m)}.\#{f}/\#{a}"
+            _ -> "?"
+          end
+        end
+        current = case info[:current_function] do
+          {m, f, a} -> "\#{inspect(m)}.\#{f}/\#{a}"
+          _ -> "?"
+        end
+        mem = Float.round(info[:memory] / 1024, 1)
+        msgs = info[:messages] |> Enum.take(5) |> inspect(pretty: true, limit: 3)
+        links = info[:links] |> Enum.map(&inspect/1) |> Enum.join(", ")
+        monitors = info[:monitors] |> Enum.take(10) |> Enum.map(fn
+          {:process, p} -> inspect(p)
+          other -> inspect(other)
+        end) |> Enum.join(", ")
+
+        state = try do
+          s = :sys.get_state(pid)
+          inspect(s, pretty: true, limit: 20, printable_limit: 1024)
+        rescue
+          _ -> "(not a GenServer or state unavailable)"
+        end
+
+        """
+        PID:              \#{inspect(pid)}
+        Registered name:  \#{name}
+        Initial call:     \#{init}
+        Current function: \#{current}
+        Status:           \#{info[:status]}
+        Memory:           \#{mem} KB
+        Heap size:        \#{info[:heap_size]} words
+        Stack size:       \#{info[:stack_size]} words
+        Reductions:       \#{info[:reductions]}
+        Message queue:    \#{info[:message_queue_len]} messages
+        Messages (first 5): \#{msgs}
+        Links:            \#{if links == "", do: "none", else: links}
+        Monitors:         \#{if monitors == "", do: "none", else: monitors}
+        Monitored by:     \#{info[:monitored_by] |> Enum.map(&inspect/1) |> Enum.join(", ") |> then(& if &1 == "", do: "none", else: &1)}
+        Trap exit:        \#{info[:trap_exit]}
+
+        State:
+        \#{state}
+        """
+    end
+end
+`;
+		},
+		(args, theme) =>
+			new Text(
+				theme.fg("toolTitle", theme.bold("elixir_process_info ")) +
+					theme.fg("accent", String(args.process ?? "")),
+				0,
+				0,
+			),
+	);
+
+	evalTool(
+		"elixir_deps_tree",
+		"Deps Tree",
+		`Show compile-time dependencies for a module using Mix.Xref.
+Lists modules that the given module calls (exports) and modules that call it (callers).
+Use to understand coupling, find circular dependencies, and navigate unfamiliar codebases.`,
+		Type.Object({
+			module: Type.String({ description: "Module name, e.g. MyApp.Orders or MyAppWeb.OrderController" }),
+			direction: Type.Optional(
+				Type.String({
+					description:
+						"exports (modules this module calls, default), callers (modules that call this module), or both",
+				}),
+			),
+		}),
+		(params) => {
+			const mod = String(params.module);
+			const direction = params.direction ? String(params.direction) : "both";
+			const modAtom = `Module.concat([${mod.split(".").map((s) => `:"${s}"`).join(", ")}])`;
+			return `
+target = ${modAtom}
+
+all = Mix.Xref.calls()
+
+${direction === "exports" || direction === "both" ? `
+exports =
+  all
+  |> Enum.filter(fn %{caller_module: caller} -> caller == target end)
+  |> Enum.map(fn %{module: m, function: f, arity: a} -> {m, f, a} end)
+  |> Enum.uniq()
+  |> Enum.sort()
+  |> Enum.group_by(&elem(&1, 0))
+  |> Enum.sort_by(fn {mod, _} -> inspect(mod) end)
+` : "exports = []"}
+
+${direction === "callers" || direction === "both" ? `
+callers =
+  all
+  |> Enum.filter(fn %{module: m} -> m == target end)
+  |> Enum.map(fn %{caller_module: caller, function: f, arity: a} -> {caller, f, a} end)
+  |> Enum.uniq()
+  |> Enum.sort()
+  |> Enum.group_by(&elem(&1, 0))
+  |> Enum.sort_by(fn {mod, _} -> inspect(mod) end)
+` : "callers = []"}
+
+format_group = fn grouped, header ->
+  if grouped == [] do
+    "\#{header}: (none)"
+  else
+    lines = Enum.map(grouped, fn {mod, funs} ->
+      calls = Enum.map(funs, fn {_, f, a} -> "\#{f}/\#{a}" end) |> Enum.join(", ")
+      "  \#{inspect(mod)} — \#{calls}"
+    end)
+    "\#{header} (\#{length(grouped)} modules):\\n" <> Enum.join(lines, "\\n")
+  end
+end
+
+parts = []
+${direction === "exports" || direction === "both" ? `parts = parts ++ [format_group.(exports, "Calls (this module depends on)")]` : ""}
+${direction === "callers" || direction === "both" ? `parts = parts ++ [format_group.(callers, "Called by (depends on this module)")]` : ""}
+
+"# \#{inspect(target)}\\n\\n" <> Enum.join(parts, "\\n\\n")
+`;
+		},
+		(args, theme) => {
+			let text = theme.fg("toolTitle", theme.bold("elixir_deps_tree "));
+			text += theme.fg("accent", String(args.module ?? ""));
+			if (args.direction) text += theme.fg("muted", ` ${args.direction}`);
+			return new Text(text, 0, 0);
+		},
+	);
+
+	evalTool(
+		"elixir_types",
+		"Type Info",
+		`Get type specifications and behaviour callbacks for a module or function.
+Shows @type, @spec, @callback definitions. Use to understand function signatures and data structures.`,
+		Type.Object({
+			reference: Type.String({
+				description: "Module name (for all types/specs) or Module.function/arity (for specific spec)",
+			}),
+		}),
+		(params) => {
+			const ref = String(params.reference);
+			const hasFun = ref.includes(".");
+			const hasArity = ref.includes("/");
+
+			if (!hasFun) {
+				const modAtom = `Module.concat([${ref.split(".").map((s) => `:"${s}"`).join(", ")}])`;
+				return `
+mod = ${modAtom}
+Code.ensure_loaded!(mod)
+
+types = case Code.Typespec.fetch_types(mod) do
+  {:ok, types} ->
+    types
+    |> Enum.sort_by(fn {kind, {name, _, _}} -> {kind, name} end)
+    |> Enum.map(fn {kind, type_ast} ->
+      "@\#{kind} \#{Macro.to_string(Code.Typespec.type_to_quoted(type_ast))}"
+    end)
+  :error -> []
+end
+
+specs = case Code.Typespec.fetch_specs(mod) do
+  {:ok, specs} ->
+    Enum.flat_map(specs, fn {{fun, arity}, spec_list} ->
+      Enum.map(spec_list, fn spec ->
+        "@spec \#{Macro.to_string(Code.Typespec.spec_to_quoted(fun, spec))}"
+      end)
+    end)
+    |> Enum.sort()
+  :error -> []
+end
+
+callbacks = case Code.Typespec.fetch_callbacks(mod) do
+  {:ok, cbs} ->
+    Enum.flat_map(cbs, fn {{fun, arity}, spec_list} ->
+      Enum.map(spec_list, fn spec ->
+        "@callback \#{Macro.to_string(Code.Typespec.spec_to_quoted(fun, spec))}"
+      end)
+    end)
+    |> Enum.sort()
+  :error -> []
+end
+
+parts = []
+parts = if types != [], do: parts ++ ["## Types\\n" <> Enum.join(types, "\\n")], else: parts
+parts = if specs != [], do: parts ++ ["## Specs\\n" <> Enum.join(specs, "\\n")], else: parts
+parts = if callbacks != [], do: parts ++ ["## Callbacks\\n" <> Enum.join(callbacks, "\\n")], else: parts
+
+if parts == [] do
+  "No types, specs, or callbacks found for \#{inspect(mod)}"
+else
+  "# \#{inspect(mod)}\\n\\n" <> Enum.join(parts, "\\n\\n")
+end
+`;
+			}
+
+			const parts = ref.split(".");
+			const funPart = parts.pop()!;
+			const modParts = parts;
+			const modAtom = `Module.concat([${modParts.map((s) => `:"${s}"`).join(", ")}])`;
+
+			let funName: string;
+			let arityFilter: string;
+			if (hasArity) {
+				const [f, a] = funPart.split("/");
+				funName = f;
+				arityFilter = `arity == ${a}`;
+			} else {
+				funName = funPart;
+				arityFilter = "true";
+			}
+
+			return `
+mod = ${modAtom}
+fun = :${funName}
+Code.ensure_loaded!(mod)
+
+specs = case Code.Typespec.fetch_specs(mod) do
+  {:ok, specs} ->
+    Enum.flat_map(specs, fn {{f, arity}, spec_list} ->
+      if f == fun and ${arityFilter} do
+        Enum.map(spec_list, fn spec ->
+          "@spec \#{Macro.to_string(Code.Typespec.spec_to_quoted(f, spec))}"
+        end)
+      else
+        []
+      end
+    end)
+  :error -> []
+end
+
+if specs == [] do
+  "No specs found for \#{inspect(mod)}.\#{fun}${hasArity ? `/${funPart.split("/")[1]}` : ""}"
+else
+  Enum.join(specs, "\\n")
+end
+`;
+		},
+		(args, theme) =>
+			new Text(
+				theme.fg("toolTitle", theme.bold("elixir_types ")) +
+					theme.fg("accent", String(args.reference ?? "")),
+				0,
+				0,
+			),
+		{ renderResult: renderElixirResult },
+	);
 }

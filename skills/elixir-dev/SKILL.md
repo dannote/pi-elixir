@@ -19,6 +19,11 @@ The BEAM knows more about the code than the filesystem. Prefer runtime tools:
 | `bash "sqlite3 ... 'SELECT ...'"` | `elixir_sql query="SELECT ..."` | Runs through the app's Ecto repo |
 | Guessing what modules exist | `elixir_schemas` | Lists all Ecto schemas with paths |
 | Reading logs from terminal | `elixir_logs tail=20 level="error"` | Structured, filterable |
+| Writing process inspection code | `elixir_process_info process="MyApp.Repo"` | Structured output, shows state |
+| Writing supervisor tree code | `elixir_sup_tree` | Full tree with strategies and PIDs |
+| Manual `Process.list` sorting | `elixir_top sort=memory limit=10` | Pre-formatted process manager |
+| Searching for module dependencies | `elixir_deps_tree module="MyApp.Orders"` | Uses Mix.Xref, shows callers/callees |
+| Running `t(Module)` via eval | `elixir_types reference="MyApp.Orders"` | All types, specs, and callbacks |
 
 Fall back to `read`/`edit`/`write`/`bash` for file operations and mix commands (compile, test, format, migrations).
 
@@ -195,10 +200,59 @@ Tidewave.clear_logs()
 
 Then use `elixir_logs` to read only fresh output after the operation.
 
+## BEAM Introspection Tools
+
+These tools provide deep visibility into the running BEAM VM without writing boilerplate code.
+
+### `elixir_sup_tree` — Supervision Tree
+
+Shows the full supervision hierarchy with restart strategies, PIDs, and child types:
+```
+elixir_sup_tree                              # auto-detects app supervisor
+elixir_sup_tree root="MyApp.Supervisor"      # specific supervisor
+elixir_sup_tree depth=2                      # limit depth
+```
+
+### `elixir_top` — Process Top
+
+Like `htop` for BEAM processes — find memory hogs, busy processes, or overloaded mailboxes:
+```
+elixir_top                        # top 15 by memory
+elixir_top sort=reductions        # busiest processes
+elixir_top sort=message_queue_len # backed-up mailboxes
+elixir_top limit=5                # just top 5
+```
+
+### `elixir_process_info` — Process Inspector
+
+Deep inspection of a single process — state, messages, links, monitors:
+```
+elixir_process_info process="MyApp.Repo"
+elixir_process_info process="0.500.0"        # by PID
+```
+
+### `elixir_deps_tree` — Module Dependencies
+
+Show what a module calls and what calls it, using Mix.Xref:
+```
+elixir_deps_tree module="MyApp.Orders"                    # both directions
+elixir_deps_tree module="MyApp.Orders" direction=callers  # who calls this?
+elixir_deps_tree module="MyApp.Orders" direction=exports  # what does this call?
+```
+
+### `elixir_types` — Type Specifications
+
+Get @type, @spec, and @callback definitions:
+```
+elixir_types reference="MyApp.Orders"           # all types and specs
+elixir_types reference="Ecto.Changeset.cast/4"  # specific function spec
+```
+
 ## Workflow
 
-1. **Explore** — `elixir_source`, `elixir_docs`, `elixir_eval` with `exports/1` and `i/1`
-2. **Edit** — `read`/`edit`/`write` for file changes
-3. **Verify** — `bash "mix compile"`, `elixir_logs` for errors
-4. **Test** — `bash "mix test test/path.exs:42"` or `bash "mix test --failed"`
-5. **Format** — `bash "mix format"`
+1. **Explore** — `elixir_source`, `elixir_docs`, `elixir_sup_tree`, `elixir_types`
+2. **Understand** — `elixir_deps_tree`, `elixir_process_info`, `elixir_top`
+3. **Edit** — `read`/`edit`/`write` for file changes
+4. **Verify** — `bash "mix compile"`, `elixir_logs` for errors
+5. **Test** — `bash "mix test test/path.exs:42"` or `bash "mix test --failed"`
+6. **Format** — `bash "mix format"`
