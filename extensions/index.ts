@@ -29,6 +29,7 @@ function bridgeTool(
 	description: string,
 	parameters: ReturnType<typeof Type.Object>,
 	renderCall: (args: Record<string, unknown>, theme: any) => any,
+	transformResult?: (text: string) => string,
 ) {
 	pi.registerTool({
 		name,
@@ -36,7 +37,8 @@ function bridgeTool(
 		description,
 		parameters,
 		async execute(_id, params, signal) {
-			const { text, isError } = await callTool(url, mcpName, params, signal);
+			let { text, isError } = await callTool(url, mcpName, params, signal);
+			if (transformResult) text = transformResult(text);
 			return {
 				content: [{ type: "text" as const, text: truncated(text) }],
 				isError,
@@ -45,6 +47,24 @@ function bridgeTool(
 		},
 		renderCall,
 	});
+}
+
+function formatHexSearchResults(raw: string): string {
+	const countMatch = raw.match(/^Results: (\d+)/);
+	const count = countMatch ? countMatch[1] : "?";
+
+	const results: string[] = [];
+	const re = /<result\s+index="(\d+)"\s+package="([^"]+)"\s+ref="([^"]+)"\s+title="([^"]*)">\n([\s\S]*?)\n<\/result>/g;
+	let m;
+	while ((m = re.exec(raw)) !== null) {
+		const [, , pkg, ref, title, doc] = m;
+		const trimmed = doc.trim();
+		const url = `https://hexdocs.pm/${pkg.replace(/-([^-]+)$/, "/$1/")}${ref}`;
+		results.push(`### ${title}\n${url}\n\n${trimmed}`);
+	}
+
+	if (results.length === 0) return raw;
+	return `${count} results\n\n${results.join("\n\n---\n\n")}`;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -208,6 +228,7 @@ Use to verify migrations, check data, introspect schema.`,
 			text += theme.fg("accent", `"${args.q}"`);
 			return new Text(text, 0, 0);
 		},
+		formatHexSearchResults,
 	);
 
 	bridgeTool(
