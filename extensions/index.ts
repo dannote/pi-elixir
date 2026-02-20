@@ -445,21 +445,23 @@ defmodule PiSupTree do
 end
 
 root = ${root ? `Module.concat([${root.split(".").map((s) => `:"${s}"`).join(", ")}])` : `
-  case Application.started_applications() |> Enum.find(fn {app, _, _} ->
-    app_modules = case :application.get_key(app, :modules) do
-      {:ok, mods} -> mods
-      _ -> []
-    end
-    Enum.any?(app_modules, fn m -> String.contains?(inspect(m), "Supervisor") end) and
-    app not in [:kernel, :stdlib, :elixir, :logger, :phoenix, :ecto, :postgrex, :telemetry, :tidewave, :bandit, :plug]
-  end) do
-    {app, _, _} ->
-      children = Application.spec(app, :mod)
-      case children do
-        {mod, _} -> mod
-        _ -> nil
-      end
+  app_module_prefix =
+    Mix.Project.config()[:app]
+    |> Atom.to_string()
+    |> Macro.camelize()
+
+  Process.registered()
+  |> Enum.map(&to_string/1)
+  |> Enum.filter(fn name ->
+    String.starts_with?(name, "Elixir." <> app_module_prefix) and
+    String.ends_with?(name, ".Supervisor") and
+    not String.contains?(name, "PubSub")
+  end)
+  |> Enum.sort_by(&String.length/1)
+  |> List.first()
+  |> case do
     nil -> nil
+    name -> String.to_existing_atom(name)
   end
 `}
 
@@ -690,13 +692,13 @@ Use to understand coupling, find circular dependencies, and navigate unfamiliar 
 			return `
 target = ${modAtom}
 
-all = Mix.Xref.calls()
+all = Mix.Tasks.Xref.calls()
 
 ${direction === "exports" || direction === "both" ? `
 exports =
   all
   |> Enum.filter(fn %{caller_module: caller} -> caller == target end)
-  |> Enum.map(fn %{module: m, function: f, arity: a} -> {m, f, a} end)
+  |> Enum.map(fn %{callee: {m, f, a}} -> {m, f, a} end)
   |> Enum.uniq()
   |> Enum.sort()
   |> Enum.group_by(&elem(&1, 0))
@@ -706,8 +708,8 @@ exports =
 ${direction === "callers" || direction === "both" ? `
 callers =
   all
-  |> Enum.filter(fn %{module: m} -> m == target end)
-  |> Enum.map(fn %{caller_module: caller, function: f, arity: a} -> {caller, f, a} end)
+  |> Enum.filter(fn %{callee: {m, _, _}} -> m == target end)
+  |> Enum.map(fn %{caller_module: caller, callee: {_, f, a}} -> {caller, f, a} end)
   |> Enum.uniq()
   |> Enum.sort()
   |> Enum.group_by(&elem(&1, 0))
