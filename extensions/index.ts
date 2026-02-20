@@ -3,6 +3,7 @@ import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
+	highlightCode,
 	truncateHead,
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
@@ -20,6 +21,11 @@ function truncated(text: string) {
 	);
 }
 
+interface BridgeToolOpts {
+	transformResult?: (text: string) => string;
+	renderResult?: (result: any, options: any, theme: any) => any;
+}
+
 function bridgeTool(
 	pi: ExtensionAPI,
 	url: string,
@@ -29,7 +35,7 @@ function bridgeTool(
 	description: string,
 	parameters: ReturnType<typeof Type.Object>,
 	renderCall: (args: Record<string, unknown>, theme: any) => any,
-	transformResult?: (text: string) => string,
+	opts?: BridgeToolOpts,
 ) {
 	pi.registerTool({
 		name,
@@ -38,7 +44,7 @@ function bridgeTool(
 		parameters,
 		async execute(_id, params, signal) {
 			let { text, isError } = await callTool(url, mcpName, params, signal);
-			if (transformResult) text = transformResult(text);
+			if (opts?.transformResult) text = opts.transformResult(text);
 			return {
 				content: [{ type: "text" as const, text: truncated(text) }],
 				isError,
@@ -46,7 +52,59 @@ function bridgeTool(
 			};
 		},
 		renderCall,
+		renderResult: opts?.renderResult,
 	});
+}
+
+function renderElixirResult(result: any, { expanded }: any, theme: any) {
+	const text = result.content?.[0]?.text ?? "";
+	if (!text || result.isError) return new Text(text, 0, 0);
+
+	const highlighted = highlightCode(text, "elixir");
+	return new Text(highlighted.join("\n"), 0, 0);
+}
+
+function renderMarkdownResult(result: any, { expanded }: any, theme: any) {
+	const text = result.content?.[0]?.text ?? "";
+	if (!text || result.isError) return new Text(text, 0, 0);
+
+	const lines: string[] = [];
+	let inCodeBlock = false;
+	let codeLang = "";
+	let codeBuffer: string[] = [];
+
+	for (const line of text.split("\n")) {
+		const fenceMatch = line.match(/^```(\w*)/);
+		if (fenceMatch && !inCodeBlock) {
+			inCodeBlock = true;
+			codeLang = fenceMatch[1] || "elixir";
+			codeBuffer = [];
+		} else if (line.startsWith("```") && inCodeBlock) {
+			const highlighted = highlightCode(codeBuffer.join("\n"), codeLang);
+			lines.push(...highlighted);
+			inCodeBlock = false;
+		} else if (inCodeBlock) {
+			codeBuffer.push(line);
+		} else if (line.startsWith("# ")) {
+			lines.push(theme.fg("accent", theme.bold(line)));
+		} else if (line.startsWith("## ") || line.startsWith("### ")) {
+			lines.push(theme.fg("accent", line));
+		} else {
+			lines.push(line);
+		}
+	}
+
+	if (inCodeBlock && codeBuffer.length > 0) {
+		lines.push(...highlightCode(codeBuffer.join("\n"), codeLang));
+	}
+
+	return new Text(lines.join("\n"), 0, 0);
+}
+
+function renderSqlResult(result: any, _options: any, theme: any) {
+	const text = result.content?.[0]?.text ?? "";
+	if (!text || result.isError) return new Text(text, 0, 0);
+	return new Text(highlightCode(text, "elixir").join("\n"), 0, 0);
 }
 
 function formatHexSearchResults(raw: string): string {
@@ -119,6 +177,7 @@ Output truncated to ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)
 				0,
 			);
 		},
+		{ renderResult: renderElixirResult },
 	);
 
 	bridgeTool(
@@ -142,6 +201,7 @@ Accepts: Module, Module.function, Module.function/arity, c:Module.callback/arity
 				0,
 				0,
 			),
+		{ renderResult: renderMarkdownResult },
 	);
 
 	bridgeTool(
@@ -189,6 +249,7 @@ Use to verify migrations, check data, introspect schema.`,
 				0,
 			);
 		},
+		{ renderResult: renderSqlResult },
 	);
 
 	bridgeTool(
@@ -228,7 +289,7 @@ Use to verify migrations, check data, introspect schema.`,
 			text += theme.fg("accent", `"${args.q}"`);
 			return new Text(text, 0, 0);
 		},
-		formatHexSearchResults,
+		{ transformResult: formatHexSearchResults, renderResult: renderMarkdownResult },
 	);
 
 	bridgeTool(
