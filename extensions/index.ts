@@ -8,13 +8,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { callTool, isReachable } from "./tidewave-client.ts";
-
-const DEFAULT_URL = "http://localhost:4000/tidewave/mcp";
-
-function getTidewaveUrl(): string {
-	return process.env.TIDEWAVE_URL || DEFAULT_URL;
-}
+import { callTool, resolveUrl, invalidateCache, stopAllEmbedded, getConnectionKind } from "./tidewave-client.ts";
 
 function truncated(text: string) {
 	const t = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
@@ -45,15 +39,14 @@ function bridgeTool(
 		label,
 		description,
 		parameters,
-		async execute(_id, params, signal) {
-			const url = getTidewaveUrl();
-			const reachable = await isReachable(url);
-			if (!reachable) {
+		async execute(_id, params, signal, _onUpdate, ctx) {
+			const conn = await resolveUrl(ctx.cwd);
+			if (!conn) {
 				return {
 					content: [
 						{
 							type: "text" as const,
-							text: `BEAM not reachable at ${url}. Start the Phoenix server with \`mix phx.server\` and ensure Tidewave is installed.`,
+							text: `No BEAM connection for this project. Start the Phoenix server with \`mix phx.server\` or ensure mix.exs exists and the project compiles.`,
 						},
 					],
 					isError: true,
@@ -61,7 +54,7 @@ function bridgeTool(
 				};
 			}
 
-			let { text, isError } = await callTool(url, mcpName, params, signal);
+			let { text, isError } = await callTool(conn.url, mcpName, params, signal);
 			if (opts?.transformResult) text = opts.transformResult(text);
 			return {
 				content: [{ type: "text" as const, text: truncated(text) }],
@@ -167,15 +160,19 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (!isElixirProject(ctx.cwd)) return;
 
-		const url = getTidewaveUrl();
-		const connected = await isReachable(url);
+		const conn = await resolveUrl(ctx.cwd);
 		const t = ctx.ui.theme;
-		ctx.ui.setStatus(
-			"elixir",
-			connected
-				? t.fg("success", "⬡") + " " + t.fg("muted", "BEAM")
-				: t.fg("warning", "⬡") + " " + t.fg("muted", "BEAM offline"),
-		);
+
+		if (conn) {
+			const label = conn.kind === "embedded" ? "BEAM (embedded)" : "BEAM";
+			ctx.ui.setStatus("elixir", t.fg("success", "⬡") + " " + t.fg("muted", label));
+		} else {
+			ctx.ui.setStatus("elixir", t.fg("warning", "⬡") + " " + t.fg("muted", "BEAM offline"));
+		}
+	});
+
+	pi.on("session_shutdown", async () => {
+		stopAllEmbedded();
 	});
 
 	bridgeTool(
@@ -341,15 +338,14 @@ Use to verify migrations, check data, introspect schema.`,
 			label,
 			description,
 			parameters,
-			async execute(_id, params, signal) {
-				const url = getTidewaveUrl();
-				const reachable = await isReachable(url);
-				if (!reachable) {
+			async execute(_id, params, signal, _onUpdate, ctx) {
+				const conn = await resolveUrl(ctx.cwd);
+				if (!conn) {
 					return {
 						content: [
 							{
 								type: "text" as const,
-								text: `BEAM not reachable at ${url}. Start the Phoenix server with \`mix phx.server\` and ensure Tidewave is installed.`,
+								text: `No BEAM connection for this project. Start the Phoenix server with \`mix phx.server\` or ensure mix.exs exists and the project compiles.`,
 							},
 						],
 						isError: true,
@@ -358,7 +354,7 @@ Use to verify migrations, check data, introspect schema.`,
 				}
 
 				const code = buildCode(params);
-				let { text, isError } = await callTool(url, "project_eval", { code }, signal);
+				let { text, isError } = await callTool(conn.url, "project_eval", { code }, signal);
 				if (opts?.transformResult) text = opts.transformResult(text);
 				return {
 					content: [{ type: "text" as const, text: truncated(text) }],
