@@ -458,32 +458,22 @@ defmodule PiSupTree do
   end
 end
 
-root = ${root ? `Module.concat([${root.split(".").map((s) => `:"${s}"`).join(", ")}])` : `
-  app_module_prefix =
-    Mix.Project.config()[:app]
-    |> Atom.to_string()
-    |> Macro.camelize()
-
-  Process.registered()
-  |> Enum.map(&to_string/1)
-  |> Enum.filter(fn name ->
-    String.starts_with?(name, "Elixir." <> app_module_prefix) and
-    String.ends_with?(name, ".Supervisor") and
-    not String.contains?(name, "PubSub")
-  end)
-  |> Enum.sort_by(&String.length/1)
-  |> List.first()
-  |> case do
-    nil -> nil
-    name -> String.to_existing_atom(name)
-  end
+root = ${root ? `Process.whereis(Module.concat([${root.split(".").map((s) => `:"${s}"`).join(", ")}]))` : `
+  app = Mix.Project.config()[:app]
+  master = :application_controller.get_master(app)
+  {top_sup, _mod} = :application_master.get_child(master)
+  top_sup
 `}
 
 case root do
   nil -> "Could not auto-detect application supervisor. Pass root=MyApp.Supervisor explicitly."
-  mod ->
+  pid ->
+    name = case Process.info(pid, :registered_name) do
+      {:registered_name, name} when is_atom(name) -> inspect(name)
+      _ -> inspect(pid)
+    end
     strategy = try do
-      case :sys.get_status(Process.whereis(mod) || mod) do
+      case :sys.get_status(pid) do
         {:status, _, _, [_, _, _, _, [header | _]]} ->
           case header do
             {_, _, {:data, data}} -> Keyword.get(data, :strategy, :unknown)
@@ -494,8 +484,8 @@ case root do
     rescue
       _ -> :unknown
     end
-    header = "#{inspect(mod)} (strategy=#{strategy})\\n"
-    header <> PiSupTree.print(Process.whereis(mod) || mod)
+    header = "#{name} (strategy=#{strategy})\\n"
+    header <> PiSupTree.print(pid)
 end
 `;
 		},
