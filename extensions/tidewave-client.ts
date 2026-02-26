@@ -125,7 +125,10 @@ interface EmbeddedProcess {
 	proc: childProcess.ChildProcess;
 	url: string;
 	port: number;
+	ready: boolean;
 }
+
+type StatusCallback = (cwd: string, kind: ConnectionKind) => void;
 
 const SCRIPT_PATH = path.resolve(__dirname, "../scripts/embedded_tidewave.exs");
 const EMBEDDED_PORT_START = 4041;
@@ -133,6 +136,11 @@ const EMBEDDED_PORT_END = 4060;
 
 const embeddedProcesses = new Map<string, EmbeddedProcess>();
 let nextEmbeddedPort = EMBEDDED_PORT_START;
+let onStatusChange: StatusCallback | null = null;
+
+export function setStatusCallback(cb: StatusCallback): void {
+	onStatusChange = cb;
+}
 
 function pickPort(): number {
 	const port = nextEmbeddedPort;
@@ -141,73 +149,43 @@ function pickPort(): number {
 	return port;
 }
 
-async function startEmbedded(cwd: string): Promise<string | null> {
+function startEmbeddedInBackground(cwd: string): void {
 	const existing = embeddedProcesses.get(cwd);
-	if (existing) {
-		const config = await fetchConfig(existing.url.replace(/\/mcp$/, ""));
-		if (config) return existing.url;
-		stopEmbedded(cwd);
-	}
+	if (existing) return;
 
 	const port = pickPort();
 	const url = `http://localhost:${port}/mcp`;
 
-	return new Promise<string | null>((resolve) => {
-		const proc = childProcess.spawn(
-			"mix",
-			["run", "--no-halt", SCRIPT_PATH, "--port", String(port)],
-			{
-				cwd,
-				stdio: ["ignore", "pipe", "pipe"],
-				env: { ...process.env, MIX_ENV: "dev" },
-			},
-		);
+	const proc = childProcess.spawn(
+		"mix",
+		["run", "--no-halt", SCRIPT_PATH, "--port", String(port)],
+		{
+			cwd,
+			stdio: ["ignore", "pipe", "pipe"],
+			env: { ...process.env, MIX_ENV: "dev" },
+		},
+	);
 
-		let resolved = false;
-		let stderrBuf = "";
+	const entry: EmbeddedProcess = { proc, url, port, ready: false };
+	embeddedProcesses.set(cwd, entry);
 
-		const timeout = setTimeout(() => {
-			if (!resolved) {
-				resolved = true;
-				proc.kill();
-				resolve(null);
-			}
-		}, 30_000);
+	proc.stdout!.on("data", (chunk: Buffer) => {
+		if (!entry.ready && chunk.toString().includes("PI_MCP_READY")) {
+			entry.ready = true;
+			connectionCache.delete(cwd);
+			onStatusChange?.(cwd, "embedded");
+		}
+	});
 
-		proc.stdout!.on("data", (chunk: Buffer) => {
-			const text = chunk.toString();
-			if (!resolved && text.includes("PI_MCP_READY")) {
-				resolved = true;
-				clearTimeout(timeout);
-				embeddedProcesses.set(cwd, { proc, url, port });
+	proc.on("error", () => {
+		embeddedProcesses.delete(cwd);
+	});
 
-				proc.on("exit", () => {
-					embeddedProcesses.delete(cwd);
-				});
-
-				resolve(url);
-			}
-		});
-
-		proc.stderr!.on("data", (chunk: Buffer) => {
-			stderrBuf += chunk.toString();
-		});
-
-		proc.on("error", () => {
-			if (!resolved) {
-				resolved = true;
-				clearTimeout(timeout);
-				resolve(null);
-			}
-		});
-
-		proc.on("exit", (code) => {
-			if (!resolved) {
-				resolved = true;
-				clearTimeout(timeout);
-				resolve(null);
-			}
-		});
+	proc.on("exit", () => {
+		const wasReady = entry.ready;
+		embeddedProcesses.delete(cwd);
+		connectionCache.delete(cwd);
+		if (wasReady) onStatusChange?.(cwd, null);
 	});
 }
 
@@ -227,7 +205,7 @@ export function stopAllEmbedded(): void {
 
 // --- Unified URL resolution ---
 
-export type ConnectionKind = "native" | "embedded" | null;
+export type ConnectionKind = "native" | "embedded" | "starting" | null;
 
 interface CachedConnection {
 	url: string;
@@ -237,7 +215,6 @@ interface CachedConnection {
 
 const connectionCache = new Map<string, CachedConnection>();
 const CACHE_TTL = 30_000;
-const startingProjects = new Set<string>();
 
 export async function resolveUrl(cwd: string): Promise<{ url: string; kind: ConnectionKind } | null> {
 	if (process.env.TIDEWAVE_URL) {
@@ -257,27 +234,14 @@ export async function resolveUrl(cwd: string): Promise<{ url: string; kind: Conn
 
 	if (process.env.PI_ELIXIR_DISABLE_EMBEDDED === "1") return null;
 
-	const existing = embeddedProcesses.get(cwd);
-	if (existing) {
-		const config = await fetchConfig(existing.url.replace(/\/mcp$/, ""));
-		if (config) {
-			connectionCache.set(cwd, { url: existing.url, kind: "embedded", timestamp: Date.now() });
-			return { url: existing.url, kind: "embedded" };
-		}
-		stopEmbedded(cwd);
+	const embedded = embeddedProcesses.get(cwd);
+	if (embedded?.ready) {
+		connectionCache.set(cwd, { url: embedded.url, kind: "embedded", timestamp: Date.now() });
+		return { url: embedded.url, kind: "embedded" };
 	}
 
-	if (startingProjects.has(cwd)) return null;
-
-	startingProjects.add(cwd);
-	try {
-		const embeddedUrl = await startEmbedded(cwd);
-		if (embeddedUrl) {
-			connectionCache.set(cwd, { url: embeddedUrl, kind: "embedded", timestamp: Date.now() });
-			return { url: embeddedUrl, kind: "embedded" };
-		}
-	} finally {
-		startingProjects.delete(cwd);
+	if (!embedded) {
+		startEmbeddedInBackground(cwd);
 	}
 
 	return null;
@@ -290,6 +254,8 @@ export function invalidateCache(cwd: string): void {
 export function getConnectionKind(cwd: string): ConnectionKind {
 	const cached = connectionCache.get(cwd);
 	if (cached) return cached.kind;
-	if (embeddedProcesses.has(cwd)) return "embedded";
+	const embedded = embeddedProcesses.get(cwd);
+	if (embedded?.ready) return "embedded";
+	if (embedded) return "starting";
 	return null;
 }

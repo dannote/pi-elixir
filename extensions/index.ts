@@ -8,7 +8,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { callTool, resolveUrl, invalidateCache, stopAllEmbedded, getConnectionKind } from "./tidewave-client.ts";
+import { callTool, resolveUrl, invalidateCache, stopAllEmbedded, getConnectionKind, setStatusCallback, type ConnectionKind } from "./tidewave-client.ts";
 
 function truncated(text: string) {
 	const t = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
@@ -42,11 +42,14 @@ function bridgeTool(
 		async execute(_id, params, signal, _onUpdate, ctx) {
 			const conn = await resolveUrl(ctx.cwd);
 			if (!conn) {
+				const starting = getConnectionKind(ctx.cwd) === "starting";
 				return {
 					content: [
 						{
 							type: "text" as const,
-							text: `No BEAM connection for this project. Start the Phoenix server with \`mix phx.server\` or ensure mix.exs exists and the project compiles.`,
+							text: starting
+								? "The BEAM is still compiling. Wait a moment and try again."
+								: "No BEAM connection for this project. Start the Phoenix server with `mix phx.server` or ensure mix.exs exists and the project compiles.",
 						},
 					],
 					isError: true,
@@ -157,18 +160,30 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
+	function updateStatus(ctx: { ui: { theme: any; setStatus: (id: string, text: string) => void } }, kind: ConnectionKind) {
+		const t = ctx.ui.theme;
+		switch (kind) {
+			case "native":
+				ctx.ui.setStatus("elixir", t.fg("success", "⬡") + " " + t.fg("muted", "BEAM"));
+				break;
+			case "embedded":
+				ctx.ui.setStatus("elixir", t.fg("success", "⬡") + " " + t.fg("muted", "BEAM (embedded)"));
+				break;
+			case "starting":
+				ctx.ui.setStatus("elixir", t.fg("warning", "⬡") + " " + t.fg("muted", "BEAM starting…"));
+				break;
+			default:
+				ctx.ui.setStatus("elixir", t.fg("warning", "⬡") + " " + t.fg("muted", "BEAM offline"));
+		}
+	}
+
 	pi.on("session_start", async (_event, ctx) => {
 		if (!isElixirProject(ctx.cwd)) return;
 
-		const conn = await resolveUrl(ctx.cwd);
-		const t = ctx.ui.theme;
+		setStatusCallback((_cwd, kind) => updateStatus(ctx, kind));
 
-		if (conn) {
-			const label = conn.kind === "embedded" ? "BEAM (embedded)" : "BEAM";
-			ctx.ui.setStatus("elixir", t.fg("success", "⬡") + " " + t.fg("muted", label));
-		} else {
-			ctx.ui.setStatus("elixir", t.fg("warning", "⬡") + " " + t.fg("muted", "BEAM offline"));
-		}
+		const conn = await resolveUrl(ctx.cwd);
+		updateStatus(ctx, conn?.kind ?? getConnectionKind(ctx.cwd));
 	});
 
 	pi.on("session_shutdown", async () => {
@@ -341,11 +356,14 @@ Use to verify migrations, check data, introspect schema.`,
 			async execute(_id, params, signal, _onUpdate, ctx) {
 				const conn = await resolveUrl(ctx.cwd);
 				if (!conn) {
+					const starting = getConnectionKind(ctx.cwd) === "starting";
 					return {
 						content: [
 							{
 								type: "text" as const,
-								text: `No BEAM connection for this project. Start the Phoenix server with \`mix phx.server\` or ensure mix.exs exists and the project compiles.`,
+								text: starting
+									? "The BEAM is still compiling. Wait a moment and try again."
+									: "No BEAM connection for this project. Start the Phoenix server with `mix phx.server` or ensure mix.exs exists and the project compiles.",
 							},
 						],
 						isError: true,
