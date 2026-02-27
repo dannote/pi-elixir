@@ -7,19 +7,19 @@ LLMs already know how to run `mix compile` and `mix test`. What they don't know 
 ## Install
 
 ```sh
-pi install github:dannote/pi-elixir
+pi install pi-elixir
 ```
 
-No changes to your Elixir project are required. The extension auto-starts an embedded MCP server using the project's own deps (Plug, Bandit/Cowboy, Jason — already present in any Phoenix app).
+No changes to your Elixir project are required. Works with any Elixir project — Phoenix apps, libraries, whatever. The extension auto-starts an embedded MCP server when you open a project with a `mix.exs`.
 
-If you have [Tidewave](https://github.com/tidewave-ai/tidewave_phoenix) installed, the extension connects to it instead for the best experience (code reloading, Phoenix-aware features).
+For Phoenix apps with [Tidewave](https://github.com/tidewave-ai/tidewave_phoenix), the extension connects to it instead for the best experience (code reloading, Phoenix-aware features).
 
 ## How It Connects
 
 The extension resolves the BEAM connection per project:
 
 1. **Native Tidewave** — probes `localhost:4000–4009` for a running Tidewave instance and matches its `project_name` to the `app:` in your `mix.exs`
-2. **Embedded server** — if no Tidewave is found, auto-starts `mix run --no-halt` with a bundled MCP server script in the project directory
+2. **Embedded server** — if no Tidewave is found, auto-starts `mix run --no-halt` with a bundled MCP server script in the project directory. Uses Bandit/Plug if available, otherwise falls back to a built-in OTP gen_tcp server (no deps required)
 
 This means multiple Elixir projects can run simultaneously — each pi session connects to the correct BEAM.
 
