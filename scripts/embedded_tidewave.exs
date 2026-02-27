@@ -11,7 +11,7 @@ port =
     _ -> 4041
   end
 
-defmodule PiMcp.Logger do
+defmodule Pi.MCP.Logger do
   use GenServer
 
   @levels Map.new(~w[emergency alert critical error warning notice info debug]a, &{"#{&1}", &1})
@@ -83,7 +83,7 @@ defmodule PiMcp.Logger do
   end
 end
 
-defmodule PiMcp.Tools do
+defmodule Pi.MCP.Tools do
   @inspect_opts [charlists: :as_lists, limit: 50, pretty: true]
   @sql_limit 50
 
@@ -370,7 +370,7 @@ defmodule PiMcp.Tools do
       [grep: Map.get(args, "grep"), level: Map.get(args, "level")]
       |> Enum.reject(fn {_, v} -> is_nil(v) end)
 
-    {:ok, Enum.join(PiMcp.Logger.get_logs(n, opts), "\n")}
+    {:ok, Enum.join(Pi.MCP.Logger.get_logs(n, opts), "\n")}
   end
 
   def get_logs(_), do: {:error, "Missing required parameter: tail"}
@@ -496,7 +496,7 @@ defmodule PiMcp.Tools do
   end
 end
 
-defmodule PiMcp.Http do
+defmodule Pi.MCP.Http do
   @doc """
   Minimal HTTP/1.1 server using OTP's :gen_tcp with `packet: :http_bin`.
   No external dependencies — works in any Elixir project.
@@ -565,7 +565,7 @@ defmodule PiMcp.Http do
         name = params["name"]
         args = params["arguments"] || %{}
 
-        resp = case PiMcp.Tools.dispatch(name, args) do
+        resp = case Pi.MCP.Tools.dispatch(name, args) do
           {:ok, text} ->
             %{jsonrpc: "2.0", id: id, result: %{content: [%{type: "text", text: text}]}}
           {:error, message} ->
@@ -603,7 +603,7 @@ has_bandit = Code.ensure_loaded?(Bandit)
 has_cowboy = Code.ensure_loaded?(Plug.Cowboy)
 
 if has_plug and (has_bandit or has_cowboy) do
-  defmodule PiMcp.Router do
+  defmodule Pi.MCP.Router do
     use Plug.Router
 
     plug :match
@@ -631,7 +631,7 @@ if has_plug and (has_bandit or has_cowboy) do
           args = params["arguments"] || %{}
 
           {_status, body} =
-            case PiMcp.Tools.dispatch(name, args) do
+            case Pi.MCP.Tools.dispatch(name, args) do
               {:ok, text} ->
                 {200,
                  %{
@@ -678,12 +678,12 @@ end
 
 # --- Boot ---
 
-PiMcp.Logger.start_link(nil)
+Pi.MCP.Logger.start_link(nil)
 
 :ok =
   :logger.add_handler(
-    PiMcp.Logger,
-    PiMcp.Logger,
+    Pi.MCP.Logger,
+    Pi.MCP.Logger,
     %{formatter: Logger.default_formatter(colors: [enabled: false])}
   )
 
@@ -692,15 +692,15 @@ Process.flag(:trap_exit, true)
 http_server =
   cond do
     has_bandit ->
-      {:ok, _} = Bandit.start_link(plug: PiMcp.Router, port: port)
+      {:ok, _} = Bandit.start_link(plug: Pi.MCP.Router, port: port)
       :bandit
 
     has_cowboy ->
-      {:ok, _} = Plug.Cowboy.http(PiMcp.Router, [], port: port)
+      {:ok, _} = Plug.Cowboy.http(Pi.MCP.Router, [], port: port)
       :cowboy
 
     true ->
-      {:ok, _} = PiMcp.Http.start_link(port)
+      {:ok, _} = Pi.MCP.Http.start_link(port)
       :gen_tcp
   end
 
