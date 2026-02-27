@@ -496,75 +496,183 @@ defmodule PiMcp.Tools do
   end
 end
 
-defmodule PiMcp.Router do
-  use Plug.Router
+defmodule PiMcp.Http do
+  @doc """
+  Minimal HTTP/1.1 server using OTP's :gen_tcp with `packet: :http_bin`.
+  No external dependencies — works in any Elixir project.
+  """
 
-  plug :match
-  plug Plug.Parsers, parsers: [:json], json_decoder: Jason
-  plug :dispatch
-
-  get "/config" do
-    project_name =
-      Mix.Project.config()[:app] |> Atom.to_string()
-
-    body = Jason.encode!(%{
-      project_name: project_name,
-      framework_type: "embedded"
-    })
-
-    conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, body)
+  def start_link(port) do
+    pid = spawn_link(fn ->
+      {:ok, socket} = :gen_tcp.listen(port, [
+        :binary, packet: :http_bin, active: false, reuseaddr: true, backlog: 64
+      ])
+      accept_loop(socket)
+    end)
+    {:ok, pid}
   end
 
-  post "/mcp" do
-    case conn.body_params do
-      %{"jsonrpc" => "2.0", "id" => id, "method" => "tools/call", "params" => params} ->
-        name = params["name"]
-        args = params["arguments"] || %{}
+  defp accept_loop(socket) do
+    {:ok, client} = :gen_tcp.accept(socket)
+    spawn(fn -> serve(client) end)
+    accept_loop(socket)
+  end
 
-        {status, body} =
-          case PiMcp.Tools.dispatch(name, args) do
-            {:ok, text} ->
-              {200,
-               %{
-                 jsonrpc: "2.0",
-                 id: id,
-                 result: %{content: [%{type: "text", text: text}]}
-               }}
+  defp serve(socket) do
+    try do
+      {method, path, content_length} = read_request_head(socket)
 
-            {:error, message} ->
-              {200,
-               %{
-                 jsonrpc: "2.0",
-                 id: id,
-                 result: %{content: [%{type: "text", text: message}], isError: true}
-               }}
-          end
+      body =
+        if content_length > 0 do
+          :inet.setopts(socket, packet: :raw)
+          {:ok, data} = :gen_tcp.recv(socket, content_length, 120_000)
+          data
+        else
+          ""
+        end
 
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(status, Jason.encode!(body))
-
-      %{"jsonrpc" => "2.0", "id" => id, "method" => "initialize"} ->
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(%{jsonrpc: "2.0", id: id, result: %{}}))
-
-      %{"jsonrpc" => "2.0", "id" => id} ->
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(%{jsonrpc: "2.0", id: id, result: %{}}))
-
-      _ ->
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(400, Jason.encode!(%{error: "Invalid request"}))
+      {status, resp_body} = route(method, path, body)
+      send_response(socket, status, resp_body)
+    rescue
+      _ -> :ok
+    after
+      :gen_tcp.close(socket)
     end
   end
 
-  match _ do
-    send_resp(conn, 404, "Not Found")
+  defp read_request_head(socket) do
+    {:ok, {:http_request, method, {:abs_path, path}, _}} = :gen_tcp.recv(socket, 0, 10_000)
+    content_length = consume_headers(socket, 0)
+    {to_string(method), to_string(path), content_length}
+  end
+
+  defp consume_headers(socket, cl) do
+    case :gen_tcp.recv(socket, 0, 10_000) do
+      {:ok, :http_eoh} -> cl
+      {:ok, {:http_header, _, :"Content-Length", _, val}} -> consume_headers(socket, String.to_integer(val))
+      {:ok, {:http_header, _, _, _, _}} -> consume_headers(socket, cl)
+    end
+  end
+
+  defp route("GET", "/config", _body) do
+    project_name = Mix.Project.config()[:app] |> Atom.to_string()
+    {200, Jason.encode!(%{project_name: project_name, framework_type: "embedded"})}
+  end
+
+  defp route("POST", "/mcp", body) do
+    case Jason.decode(body) do
+      {:ok, %{"jsonrpc" => "2.0", "id" => id, "method" => "tools/call", "params" => params}} ->
+        name = params["name"]
+        args = params["arguments"] || %{}
+
+        resp = case PiMcp.Tools.dispatch(name, args) do
+          {:ok, text} ->
+            %{jsonrpc: "2.0", id: id, result: %{content: [%{type: "text", text: text}]}}
+          {:error, message} ->
+            %{jsonrpc: "2.0", id: id, result: %{content: [%{type: "text", text: message}], isError: true}}
+        end
+        {200, Jason.encode!(resp)}
+
+      {:ok, %{"jsonrpc" => "2.0", "id" => id}} ->
+        {200, Jason.encode!(%{jsonrpc: "2.0", id: id, result: %{}})}
+
+      _ ->
+        {400, Jason.encode!(%{error: "Invalid request"})}
+    end
+  end
+
+  defp route(_, _, _), do: {404, "Not Found"}
+
+  defp send_response(socket, status, body) do
+    status_text = case status do
+      200 -> "OK"
+      400 -> "Bad Request"
+      404 -> "Not Found"
+      _ -> "Error"
+    end
+
+    header = "HTTP/1.1 #{status} #{status_text}\r\nContent-Type: application/json\r\nContent-Length: #{byte_size(body)}\r\nConnection: close\r\n\r\n"
+    :gen_tcp.send(socket, [header, body])
+  end
+end
+
+# --- Plug-based router (used when Plug + HTTP server are available) ---
+
+has_plug = Code.ensure_loaded?(Plug.Router)
+has_bandit = Code.ensure_loaded?(Bandit)
+has_cowboy = Code.ensure_loaded?(Plug.Cowboy)
+
+if has_plug and (has_bandit or has_cowboy) do
+  defmodule PiMcp.Router do
+    use Plug.Router
+
+    plug :match
+    plug Plug.Parsers, parsers: [:json], json_decoder: Jason
+    plug :dispatch
+
+    get "/config" do
+      project_name =
+        Mix.Project.config()[:app] |> Atom.to_string()
+
+      body = Jason.encode!(%{
+        project_name: project_name,
+        framework_type: "embedded"
+      })
+
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(200, body)
+    end
+
+    post "/mcp" do
+      case conn.body_params do
+        %{"jsonrpc" => "2.0", "id" => id, "method" => "tools/call", "params" => params} ->
+          name = params["name"]
+          args = params["arguments"] || %{}
+
+          {_status, body} =
+            case PiMcp.Tools.dispatch(name, args) do
+              {:ok, text} ->
+                {200,
+                 %{
+                   jsonrpc: "2.0",
+                   id: id,
+                   result: %{content: [%{type: "text", text: text}]}
+                 }}
+
+              {:error, message} ->
+                {200,
+                 %{
+                   jsonrpc: "2.0",
+                   id: id,
+                   result: %{content: [%{type: "text", text: message}], isError: true}
+                 }}
+            end
+
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(200, Jason.encode!(body))
+
+        %{"jsonrpc" => "2.0", "id" => id, "method" => "initialize"} ->
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(200, Jason.encode!(%{jsonrpc: "2.0", id: id, result: %{}}))
+
+        %{"jsonrpc" => "2.0", "id" => id} ->
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(200, Jason.encode!(%{jsonrpc: "2.0", id: id, result: %{}}))
+
+        _ ->
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(400, Jason.encode!(%{error: "Invalid request"}))
+      end
+    end
+
+    match _ do
+      send_resp(conn, 404, "Not Found")
+    end
   end
 end
 
@@ -583,17 +691,17 @@ Process.flag(:trap_exit, true)
 
 http_server =
   cond do
-    Code.ensure_loaded?(Bandit) ->
+    has_bandit ->
       {:ok, _} = Bandit.start_link(plug: PiMcp.Router, port: port)
       :bandit
 
-    Code.ensure_loaded?(Plug.Cowboy) ->
+    has_cowboy ->
       {:ok, _} = Plug.Cowboy.http(PiMcp.Router, [], port: port)
       :cowboy
 
     true ->
-      IO.puts(:stderr, "ERROR: Neither Bandit nor Plug.Cowboy found in project deps")
-      System.halt(1)
+      {:ok, _} = PiMcp.Http.start_link(port)
+      :gen_tcp
   end
 
 # Wait for port to be accepting connections before signaling ready
