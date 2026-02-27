@@ -52,10 +52,14 @@ end
 root =
   case root_module do
     nil ->
-      app = Mix.Project.config()[:app]
-      master = :application_controller.get_master(app)
-      {top_sup, _mod} = :application_master.get_child(master)
-      top_sup
+      try do
+        app = Mix.Project.config()[:app]
+        master = :application_controller.get_master(app)
+        {top_sup, _mod} = :application_master.get_child(master)
+        top_sup
+      rescue
+        _ -> nil
+      end
     name ->
       name |> String.split(".") |> Module.concat() |> Process.whereis()
   end
