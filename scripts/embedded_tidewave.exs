@@ -503,13 +503,24 @@ defmodule Pi.MCP.Http do
   """
 
   def start_link(port) do
+    parent = self()
     pid = spawn_link(fn ->
       {:ok, socket} = :gen_tcp.listen(port, [
         :binary, packet: :http_bin, active: false, reuseaddr: true, backlog: 64
       ])
+      {:ok, actual_port} = :inet.port(socket)
+      send(parent, {:gen_tcp_port, actual_port})
       accept_loop(socket)
     end)
     {:ok, pid}
+  end
+
+  def port(_pid) do
+    receive do
+      {:gen_tcp_port, p} -> p
+    after
+      5_000 -> raise "gen_tcp server did not report port"
+    end
   end
 
   defp accept_loop(socket) do
@@ -689,24 +700,31 @@ Pi.MCP.Logger.start_link(nil)
 
 Process.flag(:trap_exit, true)
 
-http_server =
+{actual_port, http_server} =
   cond do
     has_bandit ->
-      {:ok, _} = Bandit.start_link(plug: Pi.MCP.Router, port: port)
-      :bandit
+      {:ok, server} = Bandit.start_link(plug: Pi.MCP.Router, port: port, ip: :loopback)
+      p = if port == 0 do
+        {:ok, {_, p}} = ThousandIsland.listener_info(server)
+        p
+      else
+        port
+      end
+      {p, :bandit}
 
     has_cowboy ->
       {:ok, _} = Plug.Cowboy.http(Pi.MCP.Router, [], port: port)
-      :cowboy
+      {port, :cowboy}
 
     true ->
-      {:ok, _} = Pi.MCP.Http.start_link(port)
-      :gen_tcp
+      {:ok, pid} = Pi.MCP.Http.start_link(port)
+      p = Pi.MCP.Http.port(pid)
+      {p, :gen_tcp}
   end
 
 # Wait for port to be accepting connections before signaling ready
 Enum.reduce_while(1..50, nil, fn _, _ ->
-  case :gen_tcp.connect(~c"127.0.0.1", port, [], 100) do
+  case :gen_tcp.connect(~c"127.0.0.1", actual_port, [], 100) do
     {:ok, sock} ->
       :gen_tcp.close(sock)
       {:halt, :ok}
@@ -717,7 +735,7 @@ Enum.reduce_while(1..50, nil, fn _, _ ->
   end
 end)
 
-IO.puts("PI_MCP_READY port=#{port} server=#{http_server}")
+IO.puts("PI_MCP_READY port=#{actual_port} server=#{http_server}")
 
 receive do
   :stop -> :ok
