@@ -2,6 +2,8 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { callTool, resolveUrl, getConnectionKind } from "./tidewave-client.ts";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 export { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize };
 
@@ -93,6 +95,32 @@ export function bridgeTool(
 		renderCall,
 		renderResult: opts?.renderResult,
 	});
+}
+
+const scriptCache = new Map<string, string>();
+
+export function loadScript(name: string): string {
+	const cached = scriptCache.get(name);
+	if (cached) return cached;
+	const filePath = path.resolve(__dirname, `../scripts/tools/${name}.exs`);
+	const content = fs.readFileSync(filePath, "utf-8");
+	scriptCache.set(name, content);
+	return content;
+}
+
+export function wrapWithBindings(script: string, bindings: Record<string, unknown>): string {
+	const assigns = Object.entries(bindings)
+		.map(([key, value]) => `${key} = ${elixirLiteral(value)}`)
+		.join("\n");
+	return `${assigns}\n\n${script}`;
+}
+
+function elixirLiteral(value: unknown): string {
+	if (value === null || value === undefined) return "nil";
+	if (typeof value === "string") return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+	if (typeof value === "number") return String(value);
+	if (typeof value === "boolean") return String(value);
+	return "nil";
 }
 
 export function evalTool(

@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run test/integration/",
+    "test:elixir": "elixir -r test/elixir/test_helper.exs -r test/elixir/tools_test.exs",
     "check": "oxlint extensions/ && oxfmt --check extensions/ test/"
   },
   "pi": {
