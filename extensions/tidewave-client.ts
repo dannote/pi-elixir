@@ -135,6 +135,7 @@ const EMBEDDED_PORT_START = 4041;
 const EMBEDDED_PORT_END = 4060;
 
 const embeddedProcesses = new Map<string, EmbeddedProcess>();
+const embeddedFailed = new Set<string>();
 let nextEmbeddedPort = EMBEDDED_PORT_START;
 let onStatusChange: StatusCallback | null = null;
 
@@ -179,13 +180,18 @@ function startEmbeddedInBackground(cwd: string): void {
 
 	proc.on("error", () => {
 		embeddedProcesses.delete(cwd);
+		embeddedFailed.add(cwd);
+		onStatusChange?.(cwd, null);
 	});
 
 	proc.on("exit", () => {
 		const wasReady = entry.ready;
 		embeddedProcesses.delete(cwd);
 		connectionCache.delete(cwd);
-		if (wasReady) onStatusChange?.(cwd, null);
+		if (!wasReady) {
+			embeddedFailed.add(cwd);
+		}
+		onStatusChange?.(cwd, null);
 	});
 }
 
@@ -233,6 +239,7 @@ export async function resolveUrl(cwd: string): Promise<{ url: string; kind: Conn
 	}
 
 	if (process.env.PI_ELIXIR_DISABLE_EMBEDDED === "1") return null;
+	if (embeddedFailed.has(cwd)) return null;
 
 	const embedded = embeddedProcesses.get(cwd);
 	if (embedded?.ready) {
