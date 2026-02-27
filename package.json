@@ -5,6 +5,15 @@
   "keywords": ["pi-package"],
   "license": "MIT",
   "files": ["extensions", "scripts", "skills", "README.md"],
+  "scripts": {
+    "lint": "oxlint extensions/",
+    "fmt": "oxfmt --write extensions/ test/",
+    "fmt:check": "oxfmt --check extensions/ test/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run test/integration/",
+    "check": "oxlint extensions/ && oxfmt --check extensions/ test/"
+  },
   "pi": {
     "extensions": ["./extensions/index.ts"],
     "skills": ["./skills"]
@@ -13,5 +22,10 @@
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*",
     "@sinclair/typebox": "*"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.35.0",
+    "oxlint": "^1.50.0",
+    "vitest": "^4.0.18"
   }
 }

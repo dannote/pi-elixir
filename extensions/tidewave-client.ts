@@ -105,9 +105,7 @@ async function discoverNativeTidewave(cwd: string): Promise<string | null> {
 		return config ? { url, config } : null;
 	});
 
-	const results = (await Promise.all(probes)).filter(
-		(r): r is { url: string; config: TidewaveConfig } => r !== null,
-	);
+	const results = (await Promise.all(probes)).filter((r): r is { url: string; config: TidewaveConfig } => r !== null);
 
 	if (results.length === 0) return null;
 
@@ -157,15 +155,11 @@ function startEmbeddedInBackground(cwd: string): void {
 	const port = pickPort();
 	const url = `http://localhost:${port}/mcp`;
 
-	const proc = childProcess.spawn(
-		"mix",
-		["run", "--no-halt", SCRIPT_PATH, "--port", String(port)],
-		{
-			cwd,
-			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, MIX_ENV: "dev" },
-		},
-	);
+	const proc = childProcess.spawn("mix", ["run", "--no-halt", SCRIPT_PATH, "--port", String(port)], {
+		cwd,
+		stdio: ["ignore", "pipe", "pipe"],
+		env: { ...process.env, MIX_ENV: "dev" },
+	});
 
 	const entry: EmbeddedProcess = { proc, url, port, ready: false };
 	embeddedProcesses.set(cwd, entry);
