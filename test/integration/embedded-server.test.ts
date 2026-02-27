@@ -197,6 +197,22 @@ describe.skipIf(!elixirAvailable)('embedded MCP server', () => {
     expect(typeof result.text).toBe('string')
   })
 
+  it('search_package_docs searches project dependencies', async () => {
+    const result = await mcpCall(baseUrl, 'search_package_docs', { q: 'decode' })
+    expect(result.isError).toBeFalsy()
+    expect(result.text).toContain('Results:')
+  })
+
+  it('search_package_docs filters by specific package', async () => {
+    const result = await mcpCall(baseUrl, 'search_package_docs', {
+      q: 'encode',
+      packages: ['jason']
+    })
+    expect(result.isError).toBeFalsy()
+    expect(result.text).toContain('Results:')
+    expect(result.text).toContain('jason')
+  })
+
   // --- Tool scripts (eval-based) ---
 
   describe('top.exs', () => {

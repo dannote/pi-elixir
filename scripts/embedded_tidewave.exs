@@ -400,62 +400,99 @@ defmodule Pi.MCP.Tools do
   # --- search_package_docs ---
 
   def search_package_docs(%{"q" => q} = args) do
-    if not Code.ensure_loaded?(Req) do
-      {:error, "search_package_docs requires the `req` package. Add {:req, \"~> 0.5\"} to your deps."}
-    else
-      filter_by =
-        case args["packages"] do
-          p when p in [nil, []] -> filter_from_mix_lock()
-          packages -> "package:[#{Enum.join(packages, ",")}]"
+    Mix.ensure_application!(:inets)
+    Mix.ensure_application!(:ssl)
+    Application.ensure_all_started(:inets)
+    Application.ensure_all_started(:ssl)
+
+    filter_by =
+      case args["packages"] do
+        p when p in [nil, []] -> filter_from_mix_lock()
+        packages -> filter_from_packages(packages)
+      end
+
+    params = URI.encode_query(%{"q" => q, "query_by" => "doc,title", "filter_by" => filter_by})
+    url = ~c"https://search.hexdocs.pm/?#{params}"
+
+    case :httpc.request(:get, {url, [{~c"user-agent", ~c"pi-elixir"}]}, [ssl: [verify: :verify_none]], []) do
+      {:ok, {{_, 200, _}, _, body}} ->
+        case Jason.decode(to_string(body)) do
+          {:ok, %{"found" => found, "hits" => hits}} ->
+            results =
+              hits
+              |> Enum.with_index(1)
+              |> Enum.map(fn {hit, i} ->
+                doc = hit["document"] || %{}
+                """
+                <result index="#{i}" package="#{doc["package"]}" ref="#{doc["ref"]}" title="#{doc["title"]}">
+                #{doc["doc"] || ""}
+                </result>
+                """
+              end)
+            {:ok, "Results: #{found}\n\n#{Enum.join(results, "\n")}"}
+
+          {:error, reason} ->
+            {:error, "Failed to parse HexDocs response: #{inspect(reason)}"}
         end
 
-      query_params = %{q: q, query_by: "doc,title", filter_by: filter_by}
-
-      case Req.get("https://search.hexdocs.pm/api/v1/search", params: query_params) do
-      {:ok, %{status: 200, body: %{"found" => found, "hits" => hits}}} ->
-        results =
-          Enum.with_index(hits, 1)
-          |> Enum.map(fn {hit, i} ->
-            doc = hit["document"] || %{}
-
-            """
-            <result index="#{i}" package="#{doc["package"]}" ref="#{doc["ref"]}" title="#{doc["title"]}">
-            #{doc["doc"] || ""}
-            </result>
-            """
-          end)
-
-        {:ok, "Results: #{found}\n\n#{Enum.join(results, "\n")}"}
-
-      {:ok, %{status: status}} ->
+      {:ok, {{_, status, _}, _, _}} ->
         {:error, "HexDocs search failed (HTTP #{status})"}
 
       {:error, reason} ->
         {:error, "HexDocs search error: #{inspect(reason)}"}
-      end
     end
   end
 
   def search_package_docs(_), do: {:error, "Missing required parameter: q"}
 
   defp filter_from_mix_lock do
-    lockfile = Path.join(File.cwd!(), "mix.lock")
+    app = Mix.Project.config()[:app]
+    Application.load(app)
+    deps = Application.spec(app, :applications) || []
 
-    packages =
-      if File.exists?(lockfile) do
-        {lock, _} = Code.eval_file(lockfile)
+    filter =
+      deps
+      |> Enum.uniq()
+      |> Enum.map(fn dep ->
+        "#{dep}-#{Application.spec(dep, :vsn)}"
+      end)
+      |> Enum.join(", ")
 
-        lock
-        |> Map.keys()
-        |> Enum.map(&Atom.to_string/1)
-      else
-        []
-      end
+    "package:=[#{filter}]"
+  end
 
-    case packages do
-      [] -> ""
-      _ -> "package:[#{Enum.join(packages, ",")}]"
-    end
+  defp filter_from_packages(packages) do
+    Mix.ensure_application!(:inets)
+    Mix.ensure_application!(:ssl)
+    Application.ensure_all_started(:inets)
+    Application.ensure_all_started(:ssl)
+
+    filter =
+      packages
+      |> Enum.flat_map(fn package ->
+        url = ~c"https://hex.pm/api/packages/#{package}"
+        case :httpc.request(:get, {url, [{~c"user-agent", ~c"pi-elixir"}]}, [ssl: [verify: :verify_none]], []) do
+          {:ok, {{_, 200, _}, _, body}} ->
+            case Jason.decode(to_string(body)) do
+              {:ok, %{"releases" => releases}} ->
+                version =
+                  releases
+                  |> Enum.flat_map(fn %{"version" => v} ->
+                    case Version.parse(v) do
+                      {:ok, %{pre: []}} -> [v]
+                      _ -> []
+                    end
+                  end)
+                  |> Enum.max_by(&Version.parse!/1, Version, fn -> nil end)
+                if version, do: ["#{package}-#{version}"], else: []
+              _ -> []
+            end
+          _ -> []
+        end
+      end)
+      |> Enum.join(", ")
+
+    "package:=[#{filter}]"
   end
 
   # --- helpers ---
