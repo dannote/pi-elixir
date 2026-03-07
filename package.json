@@ -1,7 +1,7 @@
 {
   "name": "pi-elixir",
-  "version": "0.3.0",
-  "description": "BEAM runtime tools for pi — connects to the running Elixir app via Tidewave",
+  "version": "0.3.1",
+  "description": "BEAM runtime tools for pi — connects to the running Elixir app for live introspection",
   "keywords": ["pi-package"],
   "license": "MIT",
   "repository": {
