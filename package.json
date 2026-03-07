@@ -4,6 +4,10 @@
   "description": "BEAM runtime tools for pi — connects to the running Elixir app via Tidewave",
   "keywords": ["pi-package"],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dannote/pi-elixir"
+  },
   "files": ["extensions", "scripts", "skills", "README.md"],
   "scripts": {
     "lint": "oxlint extensions/",
