@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+### New
+
+- **AST pattern search and replace** — `elixir_ast_search` and `elixir_ast_replace` tools powered by [ExAST](https://hex.pm/packages/ex_ast). Search and replace Elixir code by structure, not text. Variables capture, `_` is a wildcard, structs match partially. Requires `ex_ast` as a project dependency.
+- **GitHub Actions CI** — lint, format, vitest, Elixir script tests
+
 ## 0.2.0
 
 ### New
