@@ -25,6 +25,7 @@ The BEAM knows more about the code than the filesystem. Prefer runtime tools:
 | Searching for module dependencies | `elixir_deps_tree module="MyApp.Orders"` | Uses Mix.Xref, shows callers/callees |
 | Running `t(Module)` via eval | `elixir_types reference="MyApp.Orders"` | All types, specs, and callbacks |
 | Regex-based code replacement | `elixir_ast_search`/`elixir_ast_replace` | Matches code structure, not text |
+| Manual code review for duplication | `bash "mix ex_dna"` | AST-aware clone detection with refactoring suggestions |
 
 Fall back to `read`/`edit`/`write`/`bash` for file operations and mix commands (compile, test, format, migrations).
 
@@ -269,6 +270,26 @@ elixir_ast_replace pattern="IO.inspect(expr, _)" replacement="Logger.debug(inspe
 elixir_ast_replace pattern="%Step{id: \"subject\"}" replacement="SharedSteps.subject_step(@opts)" path="lib/types/"
 elixir_ast_replace pattern="dbg(expr)" replacement="expr" dryRun=true
 ```
+
+### Code Duplication Detection with ExDNA
+
+[ExDNA](https://hex.pm/packages/ex_dna) detects code clones using Elixir's AST — not text matching. Add `{:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false}` to deps.
+
+```bash
+mix ex_dna                    # find all clones
+mix ex_dna lib/my_app/        # scope to a directory
+mix ex_dna --format json      # machine-readable output
+mix ex_dna --format html      # visual HTML report
+```
+
+ExDNA finds three clone types:
+- **Type I** — exact copies
+- **Type II** — renamed variables/changed literals (`fn(a, b)` = `fn(x, y)`)
+- **Type III** — near-miss clones via tree edit distance
+
+Each clone group includes a refactoring suggestion (extract function, macro, or behaviour callback) with a smart name derived from the dominant struct, call, or pattern. Use `@no_clone` annotation to suppress intentional duplicates.
+
+Pairs well with ExAST — find clones with `mix ex_dna`, then fix them with `elixir_ast_replace`.
 
 ## Workflow
 
