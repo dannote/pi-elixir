@@ -26,6 +26,7 @@ The BEAM knows more about the code than the filesystem. Prefer runtime tools:
 | Running `t(Module)` via eval | `elixir_types reference="MyApp.Orders"` | All types, specs, and callbacks |
 | Regex-based code replacement | `elixir_ast_search`/`elixir_ast_replace` | Matches code structure, not text |
 | Manual code review for duplication | `bash "mix ex_dna"` | AST-aware clone detection with refactoring suggestions |
+| Manual code review for AI slop | `bash "mix credo"` (with ex_slop) | 18 checks for LLM-generated anti-patterns |
 
 Fall back to `read`/`edit`/`write`/`bash` for file operations and mix commands (compile, test, format, migrations).
 
@@ -290,6 +291,39 @@ ExDNA finds three clone types:
 Each clone group includes a refactoring suggestion (extract function, macro, or behaviour callback) with a smart name derived from the dominant struct, call, or pattern. Use `@no_clone` annotation to suppress intentional duplicates.
 
 Pairs well with ExAST — find clones with `mix ex_dna`, then fix them with `elixir_ast_replace`.
+
+### AI Slop Detection with ExSlop
+
+[ExSlop](https://hex.pm/packages/ex_slop) provides Credo checks that catch AI-generated code patterns. Add `{:ex_slop, "~> 0.1", only: [:dev, :test], runtime: false}` to deps, then add checks to `.credo.exs`:
+
+```elixir
+# .credo.exs — add to checks.extra (keeps built-in Credo checks)
+%{configs: [%{name: "default", checks: %{extra: [
+  {ExSlop.Check.Warning.BlanketRescue, []},
+  {ExSlop.Check.Warning.RescueWithoutReraise, []},
+  {ExSlop.Check.Warning.RepoAllThenFilter, []},
+  {ExSlop.Check.Warning.QueryInEnumMap, []},
+  {ExSlop.Check.Warning.GenserverAsKvStore, []},
+  {ExSlop.Check.Refactor.FilterNil, []},
+  {ExSlop.Check.Refactor.ReduceAsMap, []},
+  {ExSlop.Check.Refactor.MapIntoLiteral, []},
+  {ExSlop.Check.Refactor.IdentityPassthrough, []},
+  {ExSlop.Check.Refactor.IdentityMap, []},
+  {ExSlop.Check.Refactor.CaseTrueFalse, []},
+  {ExSlop.Check.Refactor.TryRescueWithSafeAlternative, []},
+  {ExSlop.Check.Refactor.WithIdentityElse, []},
+  {ExSlop.Check.Readability.NarratorDoc, []},
+  {ExSlop.Check.Readability.DocFalseOnPublicFunction, []},
+  {ExSlop.Check.Readability.BoilerplateDocParams, []},
+  {ExSlop.Check.Readability.ObviousComment, []},
+  {ExSlop.Check.Readability.StepComment, []},
+]}}]}
+```
+
+18 checks, none overlap with built-in Credo. Key catches:
+- **Warnings** — blanket `rescue _ -> nil`, N+1 queries (`Repo.get` inside `Enum.map`), `Repo.all |> Enum.filter`, GenServer as key-value store
+- **Refactoring** — `Enum.filter(fn x -> x != nil end)` → `Enum.reject(&is_nil/1)`, `Enum.map |> Enum.into(%{})` → `Map.new`, `try/rescue` around `String.to_integer` → `Integer.parse`, identity case/map/with-else
+- **Readability** — "This module provides..." docs, `# Step 1:` comments, `# Fetch the user` obvious comments, multiple `@doc false` on public functions
 
 ## Workflow
 
