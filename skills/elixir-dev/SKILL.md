@@ -24,6 +24,7 @@ The BEAM knows more about the code than the filesystem. Prefer runtime tools:
 | Manual `Process.list` sorting | `elixir_top sort=memory limit=10` | Pre-formatted process manager |
 | Searching for module dependencies | `elixir_deps_tree module="MyApp.Orders"` | Uses Mix.Xref, shows callers/callees |
 | Running `t(Module)` via eval | `elixir_types reference="MyApp.Orders"` | All types, specs, and callbacks |
+| Regex-based code replacement | `elixir_ast_search`/`elixir_ast_replace` | Matches code structure, not text |
 
 Fall back to `read`/`edit`/`write`/`bash` for file operations and mix commands (compile, test, format, migrations).
 
@@ -246,6 +247,27 @@ Get @type, @spec, and @callback definitions:
 ```
 elixir_types reference="MyApp.Orders"           # all types and specs
 elixir_types reference="Ecto.Changeset.cast/4"  # specific function spec
+```
+
+### `elixir_ast_search` — AST Pattern Search
+
+Search Elixir code by structure, not text. Requires `ex_ast` as a project dependency.
+Patterns are valid Elixir syntax — variables capture, `_` is a wildcard, structs match partially.
+```
+elixir_ast_search pattern="IO.inspect(_)"
+elixir_ast_search pattern="%Step{id: \"subject\"}" path="lib/documents/"
+elixir_ast_search pattern="def handle_call(_, _, _) do _ end"
+elixir_ast_search pattern="{:error, reason}"
+```
+
+### `elixir_ast_replace` — AST Pattern Replace
+
+Replace code by AST pattern. Captures from the pattern are substituted into the replacement by name.
+```
+elixir_ast_replace pattern="dbg(expr)" replacement="expr"
+elixir_ast_replace pattern="IO.inspect(expr, _)" replacement="Logger.debug(inspect(expr))"
+elixir_ast_replace pattern="%Step{id: \"subject\"}" replacement="SharedSteps.subject_step(@opts)" path="lib/types/"
+elixir_ast_replace pattern="dbg(expr)" replacement="expr" dryRun=true
 ```
 
 ## Workflow

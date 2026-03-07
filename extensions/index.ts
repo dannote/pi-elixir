@@ -9,6 +9,8 @@ import { register as registerDepsTree } from './tools/deps-tree.ts'
 import { register as registerDocs } from './tools/docs.ts'
 import { register as registerEts } from './tools/ets.ts'
 import { register as registerEval } from './tools/eval.ts'
+import { register as registerExAstReplace } from './tools/ex-ast-replace.ts'
+import { register as registerExAstSearch } from './tools/ex-ast-search.ts'
 import { register as registerHexSearch } from './tools/hex-search.ts'
 import { register as registerLogs } from './tools/logs.ts'
 import { register as registerProcessInfo } from './tools/process-info.ts'
@@ -77,4 +79,6 @@ export default function (pi: ExtensionAPI) {
   registerDepsTree(pi)
   registerTypes(pi)
   registerEts(pi)
+  registerExAstSearch(pi)
+  registerExAstReplace(pi)
 }
