@@ -1,4 +1,4 @@
-unless Code.ensure_loaded?(ExAst) do
+unless Code.ensure_loaded?(ExAST) do
   raise "ex_ast is not installed. Add {:ex_ast, \"~> 0.1\", only: [:dev, :test], runtime: false} to mix.exs"
 end
 
@@ -8,7 +8,7 @@ paths =
     p -> [p]
   end
 
-results = ExAst.search(paths, pattern)
+results = ExAST.search(paths, pattern)
 
 if results == [] do
   "No matches found."

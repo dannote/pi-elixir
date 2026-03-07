@@ -1,4 +1,4 @@
-unless Code.ensure_loaded?(ExAst) do
+unless Code.ensure_loaded?(ExAST) do
   raise "ex_ast is not installed. Add {:ex_ast, \"~> 0.1\", only: [:dev, :test], runtime: false} to mix.exs"
 end
 
@@ -8,7 +8,7 @@ paths =
     p -> [p]
   end
 
-results = ExAst.replace(paths, pattern, replacement, dry_run: dry_run)
+results = ExAST.replace(paths, pattern, replacement, dry_run: dry_run)
 
 case results do
   [] ->
