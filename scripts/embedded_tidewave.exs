@@ -116,6 +116,9 @@ defmodule Pi.MCP.Tools do
           _ -> :ok
         end
       end
+    else
+      Mix.Task.reenable("compile.elixir")
+      Mix.Task.run("compile.elixir")
     end
 
     {pid, ref} =
