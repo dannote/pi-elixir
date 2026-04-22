@@ -7,7 +7,7 @@ LLMs already know how to run `mix compile` and `mix test`. What they don't know 
 ## Install
 
 ```sh
-pi install pi-elixir
+pi install npm:pi-elixir
 ```
 
 No changes to your Elixir project are required. Works with any Elixir project — Phoenix apps, libraries, whatever. The extension auto-starts an embedded MCP server when you open a project with a `mix.exs`.
