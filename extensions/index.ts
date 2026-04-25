@@ -1,8 +1,8 @@
 import {
   resolveUrl,
-  stopAllEmbedded,
+  stopEmbedded,
   getConnectionKind,
-  setStatusCallback,
+  onStatusChange,
   type ConnectionKind
 } from './tidewave-client.ts'
 import { register as registerDepsTree } from './tools/deps-tree.ts'
@@ -36,34 +36,68 @@ function updateStatus(
   ctx: { ui: { theme: any; setStatus: (id: string, text: string) => void } },
   kind: ConnectionKind
 ) {
-  const t = ctx.ui.theme
-  switch (kind) {
-    case 'native':
-      ctx.ui.setStatus('elixir', t.fg('success', '⬡') + ' ' + t.fg('muted', 'BEAM'))
-      break
-    case 'embedded':
-      ctx.ui.setStatus('elixir', t.fg('success', '⬡') + ' ' + t.fg('muted', 'BEAM (embedded)'))
-      break
-    case 'starting':
-      ctx.ui.setStatus('elixir', t.fg('warning', '⬡') + ' ' + t.fg('muted', 'BEAM starting…'))
-      break
-    default:
-      ctx.ui.setStatus('elixir', t.fg('warning', '⬡') + ' ' + t.fg('muted', 'BEAM offline'))
+  try {
+    const t = ctx.ui.theme
+    switch (kind) {
+      case 'native':
+        ctx.ui.setStatus('elixir', t.fg('success', '⬡') + ' ' + t.fg('muted', 'BEAM'))
+        break
+      case 'embedded':
+        ctx.ui.setStatus('elixir', t.fg('success', '⬡') + ' ' + t.fg('muted', 'BEAM (embedded)'))
+        break
+      case 'starting':
+        ctx.ui.setStatus('elixir', t.fg('warning', '⬡') + ' ' + t.fg('muted', 'BEAM starting…'))
+        break
+      default:
+        ctx.ui.setStatus('elixir', t.fg('warning', '⬡') + ' ' + t.fg('muted', 'BEAM offline'))
+    }
+  } catch {
+    // Status updates are best-effort. Session replacement tears down the old extension context before embedded Tidewave process callbacks can finish, so using the old ctx can throw a stale-context error. Never let a footer update crash pi.
   }
 }
 
 export default function (pi: ExtensionAPI) {
+  const statusSubscriptions = new Map<string, { cwd: string; unsubscribe: () => void }>()
+
+  function subscriptionKey(ctx: {
+    cwd: string
+    sessionManager?: { getSessionFile?: () => string | null }
+  }) {
+    return `${ctx.cwd}:${ctx.sessionManager?.getSessionFile?.() ?? 'ephemeral'}`
+  }
+
+  function clearStatusSubscription(key: string) {
+    statusSubscriptions.get(key)?.unsubscribe()
+    statusSubscriptions.delete(key)
+  }
+
+  function hasStatusSubscriptionForCwd(cwd: string) {
+    return Array.from(statusSubscriptions.values()).some((subscription) => subscription.cwd === cwd)
+  }
+
   pi.on('session_start', async (_event, ctx) => {
+    const key = subscriptionKey(ctx)
+    clearStatusSubscription(key)
+
     if (!isElixirProject(ctx.cwd)) return
 
-    setStatusCallback((_cwd, kind) => updateStatus(ctx, kind))
+    const sessionCwd = ctx.cwd
+    const unsubscribe = onStatusChange((cwd, kind) => {
+      if (cwd === sessionCwd) updateStatus(ctx, kind)
+    })
+    statusSubscriptions.set(key, { cwd: sessionCwd, unsubscribe })
 
-    const conn = await resolveUrl(ctx.cwd)
-    updateStatus(ctx, conn?.kind ?? getConnectionKind(ctx.cwd))
+    const conn = await resolveUrl(sessionCwd)
+    updateStatus(ctx, conn?.kind ?? getConnectionKind(sessionCwd))
   })
 
-  pi.on('session_shutdown', async () => {
-    stopAllEmbedded()
+  pi.on('session_shutdown', async (_event, ctx) => {
+    const key = subscriptionKey(ctx)
+    clearStatusSubscription(key)
+
+    if (!hasStatusSubscriptionForCwd(ctx.cwd)) {
+      stopEmbedded(ctx.cwd)
+    }
   })
 
   registerEval(pi)

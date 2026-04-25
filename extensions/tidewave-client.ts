@@ -128,16 +128,29 @@ interface EmbeddedProcess {
   ready: boolean
 }
 
-type StatusCallback = (cwd: string, kind: ConnectionKind) => void
+type StatusListener = (cwd: string, kind: ConnectionKind) => void
 
 const SCRIPT_PATH = path.resolve(__dirname, '../scripts/embedded_tidewave.exs')
 
 const embeddedProcesses = new Map<string, EmbeddedProcess>()
 const embeddedFailed = new Set<string>()
-let onStatusChange: StatusCallback | null = null
+const statusListeners = new Set<StatusListener>()
 
-export function setStatusCallback(cb: StatusCallback): void {
-  onStatusChange = cb
+export function onStatusChange(listener: StatusListener): () => void {
+  statusListeners.add(listener)
+  return () => {
+    statusListeners.delete(listener)
+  }
+}
+
+function emitStatusChange(cwd: string, kind: ConnectionKind): void {
+  for (const listener of statusListeners) {
+    try {
+      listener(cwd, kind)
+    } catch {
+      // Status listeners are best-effort. One stale or failing subscriber must not block other sessions or crash child-process event handlers.
+    }
+  }
 }
 
 function startEmbeddedInBackground(cwd: string): void {
@@ -154,6 +167,8 @@ function startEmbeddedInBackground(cwd: string): void {
   embeddedProcesses.set(cwd, entry)
 
   proc.stdout!.on('data', (chunk: Buffer) => {
+    if (embeddedProcesses.get(cwd) !== entry) return
+
     const text = chunk.toString()
     if (!entry.ready && text.includes('PI_MCP_READY')) {
       const portMatch = text.match(/port=(\d+)/)
@@ -163,32 +178,37 @@ function startEmbeddedInBackground(cwd: string): void {
       }
       entry.ready = true
       connectionCache.delete(cwd)
-      onStatusChange?.(cwd, 'embedded')
+      emitStatusChange(cwd, 'embedded')
     }
   })
 
   proc.on('error', () => {
+    if (embeddedProcesses.get(cwd) !== entry) return
+
     embeddedProcesses.delete(cwd)
     embeddedFailed.add(cwd)
-    onStatusChange?.(cwd, null)
+    emitStatusChange(cwd, null)
   })
 
   proc.on('exit', () => {
+    if (embeddedProcesses.get(cwd) !== entry) return
+
     const wasReady = entry.ready
     embeddedProcesses.delete(cwd)
     connectionCache.delete(cwd)
     if (!wasReady) {
       embeddedFailed.add(cwd)
     }
-    onStatusChange?.(cwd, null)
+    emitStatusChange(cwd, null)
   })
 }
 
-function stopEmbedded(cwd: string): void {
+export function stopEmbedded(cwd: string): void {
   const entry = embeddedProcesses.get(cwd)
   if (entry) {
     entry.proc.kill()
     embeddedProcesses.delete(cwd)
+    connectionCache.delete(cwd)
   }
 }
 
