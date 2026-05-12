@@ -11,7 +11,7 @@ import {
   callTool,
   resolveUrl,
   getConnectionKind,
-  setStatusCallback,
+  onStatusChange,
   stopAllEmbedded
 } from '../extensions/tidewave-client.js'
 
@@ -477,7 +477,7 @@ describe('getConnectionKind', () => {
   })
 })
 
-describe('setStatusCallback', () => {
+describe('onStatusChange', () => {
   beforeEach(() => {
     resetModuleState()
     vi.stubGlobal('fetch', vi.fn())
@@ -485,7 +485,6 @@ describe('setStatusCallback', () => {
   })
 
   afterEach(() => {
-    setStatusCallback(null as any)
     resetModuleState()
     vi.restoreAllMocks()
     vi.useRealTimers()
@@ -493,7 +492,7 @@ describe('setStatusCallback', () => {
 
   it('fires callback when embedded process becomes ready', async () => {
     const cb = vi.fn()
-    setStatusCallback(cb)
+    const unsubscribe = onStatusChange(cb)
 
     vi.mocked(fetch).mockRejectedValue(new Error('connection refused'))
     vi.mocked(fs.readFileSync).mockImplementation(() => {
@@ -511,11 +510,12 @@ describe('setStatusCallback', () => {
     ;(fakeProc.stdout as EventEmitter).emit('data', Buffer.from('PI_MCP_READY'))
 
     expect(cb).toHaveBeenCalledWith('/cb-project', 'embedded')
+    unsubscribe()
   })
 
   it('fires callback with null when embedded process exits', async () => {
     const cb = vi.fn()
-    setStatusCallback(cb)
+    const unsubscribe = onStatusChange(cb)
 
     vi.mocked(fetch).mockRejectedValue(new Error('connection refused'))
     vi.mocked(fs.readFileSync).mockImplementation(() => {
@@ -533,11 +533,12 @@ describe('setStatusCallback', () => {
     fakeProc.emit('exit')
 
     expect(cb).toHaveBeenCalledWith('/cb-exit-project', null)
+    unsubscribe()
   })
 
   it('fires callback with null on process error', async () => {
     const cb = vi.fn()
-    setStatusCallback(cb)
+    const unsubscribe = onStatusChange(cb)
 
     vi.mocked(fetch).mockRejectedValue(new Error('connection refused'))
     vi.mocked(fs.readFileSync).mockImplementation(() => {
@@ -555,5 +556,195 @@ describe('setStatusCallback', () => {
     fakeProc.emit('error', new Error('spawn failed'))
 
     expect(cb).toHaveBeenCalledWith('/cb-error-project', null)
+    unsubscribe()
+  })
+
+  it('isolates listener errors from other subscribers', async () => {
+    const throwing = vi.fn(() => {
+      throw new Error('stale context')
+    })
+    const healthy = vi.fn()
+    const unsubscribeThrowing = onStatusChange(throwing)
+    const unsubscribeHealthy = onStatusChange(healthy)
+
+    vi.mocked(fetch).mockRejectedValue(new Error('connection refused'))
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+
+    const fakeProc = new EventEmitter() as childProcess.ChildProcess
+    fakeProc.stdout = new EventEmitter() as any
+    fakeProc.stderr = new EventEmitter() as any
+    fakeProc.kill = vi.fn()
+    fakeProc.pid = 12345
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc)
+
+    await resolveUrl('/isolated-cb-project')
+
+    expect(() => {
+      ;(fakeProc.stdout as EventEmitter).emit('data', Buffer.from('PI_MCP_READY'))
+    }).not.toThrow()
+
+    expect(throwing).toHaveBeenCalledWith('/isolated-cb-project', 'embedded')
+    expect(healthy).toHaveBeenCalledWith('/isolated-cb-project', 'embedded')
+    unsubscribeThrowing()
+    unsubscribeHealthy()
+  })
+
+  it('clears cached embedded URLs when stopping an embedded process', async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error('connection refused'))
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+
+    const firstProc = new EventEmitter() as childProcess.ChildProcess
+    firstProc.stdout = new EventEmitter() as any
+    firstProc.stderr = new EventEmitter() as any
+    firstProc.kill = vi.fn()
+    firstProc.pid = 12345
+
+    const secondProc = new EventEmitter() as childProcess.ChildProcess
+    secondProc.stdout = new EventEmitter() as any
+    secondProc.stderr = new EventEmitter() as any
+    secondProc.kill = vi.fn()
+    secondProc.pid = 67890
+
+    vi.mocked(childProcess.spawn).mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc)
+
+    await resolveUrl('/cached-stop-project')
+    ;(firstProc.stdout as EventEmitter).emit('data', Buffer.from('PI_MCP_READY port=3333'))
+
+    const cached = await resolveUrl('/cached-stop-project')
+    expect(cached).toEqual({ url: 'http://127.0.0.1:3333/mcp', kind: 'embedded' })
+
+    stopAllEmbedded()
+    vi.mocked(childProcess.spawn).mockClear()
+
+    const afterStop = await resolveUrl('/cached-stop-project')
+    expect(afterStop).toBeNull()
+    expect(childProcess.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores stale process exits after a newer embedded process starts for the same cwd', async () => {
+    const cb = vi.fn()
+    const unsubscribe = onStatusChange(cb)
+
+    vi.mocked(fetch).mockRejectedValue(new Error('connection refused'))
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+
+    const firstProc = new EventEmitter() as childProcess.ChildProcess
+    firstProc.stdout = new EventEmitter() as any
+    firstProc.stderr = new EventEmitter() as any
+    firstProc.kill = vi.fn()
+    firstProc.pid = 12345
+
+    const secondProc = new EventEmitter() as childProcess.ChildProcess
+    secondProc.stdout = new EventEmitter() as any
+    secondProc.stderr = new EventEmitter() as any
+    secondProc.kill = vi.fn()
+    secondProc.pid = 67890
+
+    vi.mocked(childProcess.spawn).mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc)
+
+    await resolveUrl('/restart-project')
+    stopAllEmbedded()
+    await resolveUrl('/restart-project')
+    ;(firstProc.stdout as EventEmitter).emit('data', Buffer.from('PI_MCP_READY port=3333'))
+    firstProc.emit('exit')
+
+    expect(getConnectionKind('/restart-project')).toBe('starting')
+    expect(cb).not.toHaveBeenCalled()
+
+    ;(secondProc.stdout as EventEmitter).emit('data', Buffer.from('PI_MCP_READY port=4444'))
+
+    expect(getConnectionKind('/restart-project')).toBe('embedded')
+    expect(await resolveUrl('/restart-project')).toEqual({
+      url: 'http://127.0.0.1:4444/mcp',
+      kind: 'embedded'
+    })
+
+    vi.mocked(fetch).mockClear()
+    vi.mocked(childProcess.spawn).mockClear()
+    ;(firstProc.stdout as EventEmitter).emit('data', Buffer.from('PI_MCP_READY port=3333'))
+
+    expect(await resolveUrl('/restart-project')).toEqual({
+      url: 'http://127.0.0.1:4444/mcp',
+      kind: 'embedded'
+    })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(childProcess.spawn).not.toHaveBeenCalled()
+    expect(cb).not.toHaveBeenCalledWith('/restart-project', null)
+    expect(cb).toHaveBeenCalledTimes(1)
+    expect(cb).toHaveBeenCalledWith('/restart-project', 'embedded')
+    unsubscribe()
+  })
+
+  it('ignores stale process errors after a newer embedded process starts for the same cwd', async () => {
+    const cb = vi.fn()
+    const unsubscribe = onStatusChange(cb)
+
+    vi.mocked(fetch).mockRejectedValue(new Error('connection refused'))
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+
+    const firstProc = new EventEmitter() as childProcess.ChildProcess
+    firstProc.stdout = new EventEmitter() as any
+    firstProc.stderr = new EventEmitter() as any
+    firstProc.kill = vi.fn()
+    firstProc.pid = 12345
+
+    const secondProc = new EventEmitter() as childProcess.ChildProcess
+    secondProc.stdout = new EventEmitter() as any
+    secondProc.stderr = new EventEmitter() as any
+    secondProc.kill = vi.fn()
+    secondProc.pid = 67890
+
+    vi.mocked(childProcess.spawn).mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc)
+
+    await resolveUrl('/stale-error-project')
+    stopAllEmbedded()
+    await resolveUrl('/stale-error-project')
+    firstProc.emit('error', new Error('stale process error'))
+    ;(secondProc.stdout as EventEmitter).emit('data', Buffer.from('PI_MCP_READY port=5555'))
+
+    expect(getConnectionKind('/stale-error-project')).toBe('embedded')
+    expect(cb).not.toHaveBeenCalledWith('/stale-error-project', null)
+    expect(cb).toHaveBeenCalledWith('/stale-error-project', 'embedded')
+
+    stopAllEmbedded()
+    vi.mocked(childProcess.spawn).mockClear()
+    expect(await resolveUrl('/stale-error-project')).toBeNull()
+    expect(childProcess.spawn).toHaveBeenCalledTimes(1)
+    unsubscribe()
+  })
+
+  it('notifies multiple subscribers and supports unsubscribe', async () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const unsubscribeFirst = onStatusChange(first)
+    const unsubscribeSecond = onStatusChange(second)
+
+    vi.mocked(fetch).mockRejectedValue(new Error('connection refused'))
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+
+    const fakeProc = new EventEmitter() as childProcess.ChildProcess
+    fakeProc.stdout = new EventEmitter() as any
+    fakeProc.stderr = new EventEmitter() as any
+    fakeProc.kill = vi.fn()
+    fakeProc.pid = 12345
+    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc)
+
+    await resolveUrl('/multi-cb-project')
+    unsubscribeFirst()
+    ;(fakeProc.stdout as EventEmitter).emit('data', Buffer.from('PI_MCP_READY'))
+
+    expect(first).not.toHaveBeenCalled()
+    expect(second).toHaveBeenCalledWith('/multi-cb-project', 'embedded')
+    unsubscribeSecond()
   })
 })

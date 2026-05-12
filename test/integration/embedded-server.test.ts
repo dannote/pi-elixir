@@ -18,6 +18,7 @@ function hasElixir(): boolean {
 }
 
 const elixirAvailable = hasElixir()
+const projectAvailable = fs.existsSync(PROJECT_DIR)
 
 let mcpId = 0
 
@@ -65,7 +66,7 @@ function evalScript(
   return mcpCall(baseUrl, 'project_eval', { code: `${assigns}\n\n${script}` })
 }
 
-describe.skipIf(!elixirAvailable)('embedded MCP server', () => {
+describe.skipIf(!elixirAvailable || !projectAvailable)('embedded MCP server', () => {
   let serverProcess: ChildProcess
   let baseUrl: string
 
