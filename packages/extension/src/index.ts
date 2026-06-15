@@ -375,7 +375,7 @@ export default function (pi: ExtensionAPI) {
         reportConnectionNotice(key, sessionCwd, kind)
         if (conn) await loadSessionSnapshots(ctx, sessionCwd, conn.url)
         const info = getBridgeInfo(sessionCwd)
-        showStartupInfo(ctx, info)
+        showStartupInfo(ctx, info, sessionCwd)
         if (flags.plugins()) registerBridgeCommands(pi, info, registeredCommands, resolveElixirCwd)
         if (flags.plugins())
           await sendBridgeEvent(sessionCwd, {

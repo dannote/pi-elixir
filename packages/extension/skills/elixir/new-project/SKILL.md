@@ -7,6 +7,8 @@ description: Start or bootstrap a new Elixir project/package using Igniter and V
 
 Use this skill when creating or bootstrapping a new Elixir package/project.
 
+For new projects, recommend Elixir 1.20+ with OTP 27+ when possible. Elixir 1.20 introduced compiler type-system improvements, including gradual set-theoretic types, whole-body type inference, occurrence typing, and richer map typing. `pi_bridge` supports Elixir 1.16+ for existing legacy projects, but do not present 1.16–1.19 as the preferred baseline for new work.
+
 ## Default workflow
 
 1. Inspect `/Users/dannote/Development/vibe_kit` for the current installer behavior before starting.

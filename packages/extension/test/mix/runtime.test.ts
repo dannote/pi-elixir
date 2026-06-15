@@ -6,7 +6,11 @@ vi.mock('node:child_process', () => ({
 
 import * as childProcess from 'node:child_process'
 
-import { elixirRuntimeProblem } from '#src/mix/runtime.ts'
+import {
+  detectElixirVersion,
+  elixirRuntimeProblem,
+  shouldRecommendElixir120
+} from '#src/mix/runtime.ts'
 
 describe('elixirRuntimeProblem', () => {
   beforeEach(() => {
@@ -35,5 +39,24 @@ describe('elixirRuntimeProblem', () => {
     spawn.mockReturnValueOnce({ status: 127 } as childProcess.SpawnSyncReturns<Buffer>)
 
     expect(elixirRuntimeProblem()).toContain('Mix is not available')
+  })
+
+  it('detects Elixir versions for startup recommendations', () => {
+    vi.mocked(childProcess.spawnSync).mockReturnValue({
+      status: 0,
+      stdout: 'Erlang/OTP 27 [erts-15.0]\nElixir 1.19.3\n',
+      stderr: ''
+    } as childProcess.SpawnSyncReturns<Buffer>)
+
+    const version = detectElixirVersion('/tmp/project')
+
+    expect(version).toMatchObject({ major: 1, minor: 19, patch: 3, raw: 'Elixir 1.19.3' })
+    expect(shouldRecommendElixir120(version)).toBe(true)
+  })
+
+  it('does not recommend upgrades for Elixir 1.20+', () => {
+    expect(shouldRecommendElixir120({ major: 1, minor: 20, patch: 0, raw: 'Elixir 1.20.0' })).toBe(
+      false
+    )
   })
 })
