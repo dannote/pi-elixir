@@ -48,24 +48,6 @@ function elixirVersion(cwd: string): string {
   return `${elixir} · ${otp}`
 }
 
-function elixirUpgradeRecommendation(cwd: string): string | null {
-  const result = run('elixir', ['--version'], cwd)
-  if (!result.ok) return null
-
-  const elixir = result.output
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.startsWith('Elixir '))
-  const match = elixir?.match(/^Elixir\s+(\d+)\.(\d+)/)
-  if (!match) return null
-
-  const major = Number(match[1])
-  const minor = Number(match[2])
-  if (major > 1 || (major === 1 && minor >= 20)) return null
-
-  return 'recommendation: Elixir 1.20+ (OTP 27+) is recommended for new projects to get the compiler set-theoretic type system and improved type inference; pi_bridge still supports Elixir 1.16+ for existing legacy projects.'
-}
-
 function mixVersion(cwd: string): string {
   const result = run('mix', ['--version'], cwd)
   if (!result.ok) return 'unavailable'
@@ -125,7 +107,6 @@ export function buildElixirStatusReport(cwd: string): string {
   const runtimeProblem = elixirRuntimeProblem()
   const bridgeVersion = bridgeInfo?.version ?? 'unknown'
   const source = connectionKind ?? (beamCwd ? 'not connected' : 'no Mix project')
-  const upgradeRecommendation = elixirUpgradeRecommendation(beamCwd ?? cwd)
   const lines = [
     'pi-elixir status',
     '',
@@ -135,7 +116,6 @@ export function buildElixirStatusReport(cwd: string): string {
     `Bundled fallback: ${bundledBridgeStatus()}`,
     ...(runtimeProblem ? [`Runtime problem: ${runtimeProblem}`] : []),
     ...(unavailable ? [`Unavailable: ${unavailable}`] : []),
-    ...(upgradeRecommendation ? [upgradeRecommendation] : []),
     '',
     `Next: ${nextStep({ beamCwd, runtimeProblem, unavailable, connectionKind })}`
   ]
@@ -149,7 +129,6 @@ export function buildElixirDoctorReport(cwd: string): string {
   const bridgeInfo = beamCwd ? getBridgeInfo(beamCwd) : undefined
   const unavailable = beamCwd ? getUnavailableReason(beamCwd) : undefined
   const incompatible = beamCwd ? getIncompatibleDependency(beamCwd) : undefined
-  const upgradeRecommendation = elixirUpgradeRecommendation(beamCwd ?? cwd)
   const mise = miseHint(beamCwd ?? cwd)
   const lines = [
     'pi-elixir doctor',
@@ -162,7 +141,6 @@ export function buildElixirDoctorReport(cwd: string): string {
     `Elixir: ${elixirVersion(beamCwd ?? cwd)}`,
     `Mix: ${mixVersion(beamCwd ?? cwd)}`,
     ...(runtimeProblem ? [`runtime problem: ${runtimeProblem}`] : []),
-    ...(upgradeRecommendation ? [upgradeRecommendation] : []),
     ...(mise ? [mise] : []),
     ...pathWarnings(),
     '',
