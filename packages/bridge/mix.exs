@@ -60,7 +60,7 @@ defmodule PiBridge.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
-      {:json_codec, "~> 0.1.3"},
+      {:json_codec, "~> 0.1.5"},
       {:ex_ast, "~> 0.12"},
       {:req, "~> 0.5"},
       {:quackdb, "~> 0.5.4"},

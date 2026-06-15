@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Loosened the `pi_bridge` Mix project (and the bundled `packages/fixtures/demo_project` fixture) `elixir:` requirement from `~> 1.20` to `~> 1.16` so legacy projects on Elixir 1.16–1.19 can adopt the bridge. New-project guidance and startup notices still recommend Elixir 1.20+ / OTP 27+ for the compiler's set-theoretic type-system improvements. Note: the runtime `json_codec` dep still pins `~> 1.20` upstream; installation on 1.16–1.19 requires using a `json_codec` fork with the same loosened requirement.
+- Loosened the `pi_bridge` Mix project (and the bundled `packages/fixtures/demo_project` fixture) `elixir:` requirement from `~> 1.20` to `~> 1.16` so legacy projects on Elixir 1.16–1.19 can adopt the bridge. New-project guidance and startup notices still recommend Elixir 1.20+ / OTP 27+ for the compiler's set-theoretic type-system improvements. The bridge now depends on `json_codec ~> 0.1.5`, which carries the same loosened Elixir requirement.
 
 ## 0.6.21 - 2026-06-14
 
