@@ -195,6 +195,8 @@ Feature flags are escape hatches for noisy, sensitive, or experimental environme
 
 ## Recommended project stack
 
+For new projects, install Elixir 1.20+ with OTP 27+ when possible. Elixir 1.20 introduced compiler type-system improvements, including gradual set-theoretic types, whole-body type inference, occurrence typing, and richer map typing; pi-elixir still supports older Elixir releases for existing legacy projects.
+
 For new web applications, use Phoenix with Igniter and VibeKit, then add pi-elixir in the project:
 
 ```sh
