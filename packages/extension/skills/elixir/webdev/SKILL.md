@@ -9,6 +9,8 @@ Use this skill for Phoenix/LiveView frontend work in existing projects. Keep eva
 
 Use `elixir_eval` to verify UI/runtime claims before final answers: browser console logs, replay recordings, render output, icon names, Tailwind extraction, and SFC compilation.
 
+Before adding browser/LiveView test helpers, inspect the project's existing test support organization and reuse its established case/driver/assertion/helper conventions. Do not create ad hoc flat helper files or a second browser/transport abstraction when the project already has one. Keep helper responsibilities, file paths, and module names aligned with the project's own structure.
+
 Read the focused guidance files as needed:
 
 - `feedback-loops.md` — browser console logs, replay records, render-without-browser checks.

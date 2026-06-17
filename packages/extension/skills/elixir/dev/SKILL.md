@@ -21,6 +21,8 @@ Use Elixir/OTP stdlib directly from `elixir_eval` for ordinary runtime, file, an
 
 After non-trivial Elixir edits, do not stop at tests. Run `CodeMap.reflect(changed: true)` before the final answer when Reach is available. Apply one small behavior-preserving cleanup if the evidence supports it; otherwise explicitly state why no further refactor is warranted.
 
+Before adding or moving ExUnit support code, inspect the project's existing test support organization (`test/support`, `test_helpers`, case templates, drivers, assertions, fakes, fixtures, and `test/test_helper.exs`). Preserve the project's chosen grouping and naming conventions instead of introducing ad hoc flat helper files or parallel helper hierarchies. Prefer extending existing case/driver/assertion/fake/helper modules when they already cover the responsibility. Keep helper file paths, module names, and responsibilities aligned according to the project's convention. When adding tests, make ExUnit module names follow the project's established source/test path hierarchy and naming style.
+
 Read the focused guidance files as needed:
 
 - `operating-style.md` — Elixir-specific source reading, scope, correctness, context tracking, and PR hygiene.
