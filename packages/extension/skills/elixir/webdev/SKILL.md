@@ -5,11 +5,15 @@ description: "Phoenix/LiveView web development in existing projects: UI building
 
 # Elixir Web Development
 
-Use this skill for Phoenix/LiveView frontend work in existing projects. Keep eval as the control plane: do not add or expect extra model-facing tools for web development.
+Use this skill for Phoenix/LiveView frontend work in existing projects. It layers webdev-specific verification on top of `elixir-dev`; follow `elixir-dev` for all general Elixir discipline (tool choice, module structure, documentation, internal contracts, test organization).
 
-Use `elixir_eval` to verify UI/runtime claims before final answers: browser console logs, replay recordings, render output, icon names, Tailwind extraction, and SFC compilation.
+Do not add or expect extra model-facing tools for web development. `elixir_eval` remains the control plane; webdev work verifies UI/runtime claims through package APIs and the running BEAM before final answers.
 
-Before adding browser/LiveView test helpers, inspect the project's existing test support organization and reuse its established case/driver/assertion/helper conventions. Do not create ad hoc flat helper files or a second browser/transport abstraction when the project already has one. Keep helper responsibilities, file paths, and module names aligned with the project's own structure.
+## Webdev-specific rules
+
+- Do not create a second browser/transport abstraction when the project already has one. Extend the project's existing browser test driver, LiveView test helpers, or transport module instead of forking a parallel one.
+- Verify package availability before using webdev recipes. The recipes in the focused guidance files are gated on `Code.ensure_loaded?(Module)`; do not assume a package is installed without checking.
+- Prefer BEAM-native checks first (package availability, Volt browser logs, PhoenixReplay recordings, render/eval checks). Reach for a real browser (`phoenix_test_playwright`) only for JavaScript behavior, cross-browser checks, traces, screenshots, iframe/email flows, or browser-only regressions.
 
 Read the focused guidance files as needed:
 

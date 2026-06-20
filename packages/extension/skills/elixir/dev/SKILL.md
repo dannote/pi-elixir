@@ -21,15 +21,39 @@ Use Elixir/OTP stdlib directly from `elixir_eval` for ordinary runtime, file, an
 
 After non-trivial Elixir edits, do not stop at tests. Run `CodeMap.reflect(changed: true)` before the final answer when Reach is available. Apply one small behavior-preserving cleanup if the evidence supports it; otherwise explicitly state why no further refactor is warranted.
 
-Before adding or moving ExUnit support code, inspect the project's existing test support organization (`test/support`, `test_helpers`, case templates, drivers, assertions, fakes, fixtures, and `test/test_helper.exs`). Preserve the project's chosen grouping and naming conventions instead of introducing ad hoc flat helper files or parallel helper hierarchies. Prefer extending existing case/driver/assertion/fake/helper modules when they already cover the responsibility. Keep helper file paths, module names, and responsibilities aligned according to the project's convention. When adding tests, make ExUnit module names follow the project's established source/test path hierarchy and naming style.
+## Invariants
 
-Read the focused guidance files as needed:
+These rules apply on every Elixir change. The headlines below are always in context; open the linked file when you need the full rule and examples.
 
-- `operating-style.md` — Elixir-specific source reading, scope, correctness, context tracking, and PR hygiene.
-- `tool-discipline.md` — eval/AST/LSP/shell choice rules.
-- `runtime-snippets.md` — useful runtime introspection snippets.
-- `workflow-verification.md` — edit and verification loop.
-- `publishing-packages.md` — Hex package release/publish workflow. Load this before publishing, releasing, shipping, updating Hex package versions, creating package docs, or touching GitHub releases.
+- **One concept per module.** No suffix-module splitting (don't split `Atoms`/`AtomDecoder`/`AtomDispatch`/`CachedAtoms`), no `defstruct`-only suffix files, direction-paired codegen merges, split god modules by concern, prefix hygiene, function names describe the output, module names are singular concepts. Detail: `module-structure.md`.
+- **Document every module.** Every `defmodule` gets a real `@moduledoc`. Never `@moduledoc false` — no carve-outs for generated, `__impl__`, or internal modules. Control published-docs visibility through ex_doc config (`groups_for_modules`, `skip_modules`, `filter_modules`), not by stripping docs. `@doc false` only for callback implementations whose contract is at the behaviour. Detail: `documentation.md`.
+- **Strict internal contracts.** Structs over maps for any value that crosses a module boundary. No string-keyed maps across boundaries (normalize string keys into a struct once, at the boundary). No ad hoc tagged tuples (`{:literal, v}`, `{:expr, v}`) — use a struct with a `:kind`. Keyword lists are fine for short-lived same-module values, never across boundaries. Pattern-match on structs, not on map shapes. Detail: `internal-contracts.md`.
+- **Test tree mirrors source tree.** `lib/my_app/rustler/atom.ex` → `test/my_app/rustler/atom_test.exs`. One test file may cover a module plus its closely-coupled submodules; a submodule with its own `@moduledoc` gets its own file. No ad hoc test files (`helpers_test.exs`, `smoke.exs`) unless they map to a source module. Integration tests are the only exception. Detail: `test-organization.md`.
+- **Read the docs before you code against a module.** Before calling, overriding, or implementing for any module you did not author in this session — dep, project module, or stdlib outside the truly-common surface — read its doc via `h/1`, `i/1`, `exports/1`, `b/1`, `t/1`, or `Pi.Docs.*` from `elixir_eval`. No guessing signatures, options, callbacks, or return shapes from a function's name. If the doc is missing or insufficient, read the source next; do not fill gaps by inference. Detail: `reading-docs.md`.
+- **Use JSONCodec and Jason.Encoder, not hand-rolled JSON.** Decode JSON-shaped data into structs with `JSONCodec` (`use JSONCodec`, `defstruct`, `@type t`, optional `codec/2`); never write `Jason.decode!` + a hand-rolled `from_map!`. Encode structs to JSON by deriving or implementing the `Jason.Encoder` protocol; never hand-roll a `to_map` + `Jason.encode!`. JSON string keys live only at the boundary; `JSONCodec.from_map!` is the one normalization into a struct (see `internal-contracts.md`). Detail: `serialization.md`.
+
+## Focused guidance files
+
+### Rules
+
+Read these when the situation matches:
+
+- `module-structure.md` — read before splitting, merging, naming, or introducing modules; before adding a `defstruct`-only file; before designing a module prefix.
+- `documentation.md` — read before adding or auditing `@moduledoc`/`@doc`; before configuring what shows in published HexDocs.
+- `internal-contracts.md` — read before designing a data shape that crosses a boundary; before reaching for a map or tagged tuple; before adding a `Keyword.fetch!`/`Map.get` chain.
+- `test-organization.md` — read before adding, splitting, or moving test files; before creating a new test support module.
+- `reading-docs.md` — read before calling, overriding, or implementing for a module you didn't author in this session; before guessing a signature, option, callback, or return shape; before `@impl`-ing a behaviour.
+- `serialization.md` — read before decoding JSON into a struct or encoding a struct to JSON; before writing `Jason.decode!` + a hand-rolled `from_map!`, or a hand-rolled `to_map` + `Jason.encode!`; before adding a JSONCodec "helper."
+- `operating-style.md` — read at the start of non-trivial Elixir work; scope, correctness, context tracking, PR hygiene.
+- `tool-discipline.md` — read when choosing between eval / AST / LSP / shell for a given task.
+
+### Reference
+
+Load on demand:
+
+- `runtime-snippets.md` — load when you need a runtime-introspection, docs, OTP, Ecto, QuackDB, or profiling snippet.
+- `workflow-verification.md` — load before claiming an edit is verified; the edit-and-verify loop and gate ordering.
+- `publishing-packages.md` — load before publishing, releasing, shipping, or updating a Hex package version; creating package docs; or touching GitHub releases.
 
 For Phoenix/LiveView UI, frontend assets, styling, browser-console feedback, PhoenixReplay debugging, or render verification, load `elixir-webdev` in addition to this general Elixir skill.
 
