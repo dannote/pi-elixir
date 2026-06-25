@@ -4,11 +4,11 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { getConnectionKind } from '#src/connection/resolver.ts'
-import { getIncompatibleDependency, getUnavailableReason } from '#src/connection/status.ts'
+import { getUnavailableReason } from '#src/connection/status.ts'
 import { getBridgeInfo, getEmbeddedUrl } from '#src/embedded/stdio-process.ts'
-import { hasPiDependency, readMixExs, resolveMixProjectCwd } from '#src/mix/project.ts'
+import { resolveMixProjectCwd } from '#src/mix/project.ts'
 import { elixirRuntimeProblem } from '#src/mix/runtime.ts'
-import { EXTENSION_VERSION, expectedPiBridgeDependency } from '#src/version.ts'
+import { EXTENSION_VERSION } from '#src/version.ts'
 
 interface CommandResult {
   ok: boolean
@@ -65,18 +65,6 @@ function miseHint(cwd: string): string | null {
   return `mise exec elixir: ${firstLine(result.output)}`
 }
 
-function dependencyStatus(beamCwd: string | null): string[] {
-  if (!beamCwd) return ['pi_bridge dependency: unknown (no Mix project resolved)']
-
-  const mixExs = readMixExs(beamCwd)
-  if (!mixExs) return ['pi_bridge dependency: unknown (mix.exs is not readable)']
-
-  const present = hasPiDependency(mixExs)
-  const lines = [`pi_bridge dependency: ${present ? 'present' : 'missing'}`]
-  if (!present) lines.push(`expected dependency: ${expectedPiBridgeDependency()}`)
-  return lines
-}
-
 function bundledBridgeStatus(): string {
   const here = path.dirname(fileURLToPath(import.meta.url))
   const candidates = [
@@ -113,7 +101,7 @@ export function buildElixirStatusReport(cwd: string): string {
     `Bridge: ${source}`,
     `Project: ${beamCwd ?? 'not found'}`,
     `pi_bridge: ${bridgeVersion}`,
-    `Bundled fallback: ${bundledBridgeStatus()}`,
+    `Bundled bridge: ${bundledBridgeStatus()}`,
     ...(runtimeProblem ? [`Runtime problem: ${runtimeProblem}`] : []),
     ...(unavailable ? [`Unavailable: ${unavailable}`] : []),
     '',
@@ -128,14 +116,13 @@ export function buildElixirDoctorReport(cwd: string): string {
   const connectionKind = beamCwd ? getConnectionKind(beamCwd) : null
   const bridgeInfo = beamCwd ? getBridgeInfo(beamCwd) : undefined
   const unavailable = beamCwd ? getUnavailableReason(beamCwd) : undefined
-  const incompatible = beamCwd ? getIncompatibleDependency(beamCwd) : undefined
   const mise = miseHint(beamCwd ?? cwd)
   const lines = [
     'pi-elixir doctor',
     '',
     `cwd: ${cwd}`,
     `Mix cwd: ${beamCwd ?? 'not found'}`,
-    `bundled bridge fallback: ${bundledBridgeStatus()}`,
+    `bundled bridge: ${bundledBridgeStatus()}`,
     `extension version: ${EXTENSION_VERSION}`,
     '',
     `Elixir: ${elixirVersion(beamCwd ?? cwd)}`,
@@ -144,7 +131,7 @@ export function buildElixirDoctorReport(cwd: string): string {
     ...(mise ? [mise] : []),
     ...pathWarnings(),
     '',
-    ...dependencyStatus(beamCwd),
+    'pi_bridge dependency: not required (extension-owned bundled sidecar)',
     '',
     `connection: ${connectionKind ?? 'none'}`,
     ...(beamCwd ? [`embedded url: ${getEmbeddedUrl(beamCwd)}`] : []),
@@ -154,9 +141,8 @@ export function buildElixirDoctorReport(cwd: string): string {
         ]
       : []),
     ...(unavailable ? [`unavailable reason: ${unavailable}`] : []),
-    ...(incompatible ? [`incompatible dependency: ${incompatible}`] : []),
     '',
-    `next step: ${nextStep({ beamCwd, runtimeProblem, unavailable, connectionKind, incompatible })}`
+    `next step: ${nextStep({ beamCwd, runtimeProblem, unavailable, connectionKind })}`
   ]
 
   return lines.join('\n')
@@ -167,20 +153,14 @@ function nextStep(input: {
   runtimeProblem: string | null
   unavailable?: string
   connectionKind: ReturnType<typeof getConnectionKind>
-  incompatible?: string
 }): string {
   if (!input.beamCwd) return 'run pi from a Mix project directory, or from a supported repo root'
   if (input.runtimeProblem)
     return 'fix Elixir/Mix availability in the shell that starts pi, then restart pi'
-  if (input.incompatible)
-    return 'update the pi_bridge dependency to match this extension and run mix deps.get'
   if (input.unavailable?.startsWith('Embedded BEAM exited before ready'))
     return 'fix the embedded BEAM startup error shown above, then run /elixir:restart'
-  if (input.connectionKind === 'missing')
-    return 'run an Elixir tool and approve installing the dev-only pi_bridge dependency'
   if (input.connectionKind === 'starting')
     return 'wait for the embedded BEAM to finish starting, then retry the tool call'
-  if (input.connectionKind === 'embedded' || input.connectionKind === 'external')
-    return 'connection looks ready'
+  if (input.connectionKind === 'embedded') return 'connection looks ready'
   return 'run an Elixir tool to start the embedded BEAM, or use /elixir:restart from a Mix project'
 }

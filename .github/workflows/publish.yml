@@ -47,7 +47,7 @@ jobs:
         run: pnpm run check
 
       - name: Publish pi_bridge to Hex
-        run: mix hex.publish package --yes
+        run: mix hex.publish --yes
         working-directory: packages/bridge
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}

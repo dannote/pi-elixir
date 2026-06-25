@@ -1,5 +1,5 @@
-defmodule Pi.MCP.Tools do
-  @moduledoc "MCP tool dispatch for the embedded server."
+defmodule Pi.Tool.Dispatch do
+  @moduledoc "Bridge-native tool dispatch for stdio transports."
 
   require Pi.Features
 

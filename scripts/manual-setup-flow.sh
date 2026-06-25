@@ -199,20 +199,20 @@ log "doctor outside Mix project"
 run_doctor_interactive outside "$OUTSIDE"
 scan_known_issues outside "$LAST_PANE" || true
 
-log "doctor Mix project missing pi_bridge dependency"
+log "doctor Mix project without pi_bridge dependency"
 run_doctor_interactive missing "$MISSING"
 scan_known_issues missing "$LAST_PANE" || true
 
-log "explicit install command"
+log "sidecar leaves mix.exs unchanged"
 ORIGINAL_PATH="$PATH"
-PATH="$INSTALL/bin:$PATH" run_command_interactive install-command "$INSTALL" '/elixir:install'
+PATH="$INSTALL/bin:$PATH" run_command_interactive sidecar-start "$INSTALL" 'Use elixir_eval to return Pi.project().'
 PATH="$ORIGINAL_PATH"
 if rg -q 'pi_bridge' "$INSTALL/mix.exs"; then
-  echo "install command added pi_bridge dependency"
+  echo "sidecar unexpectedly added pi_bridge dependency"
 else
-  echo "install command did not add pi_bridge dependency"
+  echo "sidecar did not add pi_bridge dependency"
 fi
-scan_known_issues install-command "$LAST_PANE" || true
+scan_known_issues sidecar-start "$LAST_PANE" || true
 
 log "doctor wrong Elixir version"
 ORIGINAL_PATH="$PATH"

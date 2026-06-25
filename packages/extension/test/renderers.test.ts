@@ -101,16 +101,15 @@ describe('AST result rendering', () => {
 })
 
 describe('elixir result rendering', () => {
-  it('renders install transcripts like streaming command output', () => {
+  it('renders bridge startup transcripts like streaming command output', () => {
     const transcript = [
-      '[pi-elixir] Added {:pi_bridge, "== 0.6.15", only: :dev} to mix.exs',
-      '$ mix deps.get',
+      '$ mix do deps.get + run --no-halt <stdio-launcher>',
       '',
       'Resolving Hex dependencies...',
       'Resolution completed in 0.1s',
-      'New:',
+      'Unchanged:',
       '  pi_bridge 0.6.15',
-      '* Getting pi_bridge (Hex package)'
+      'All dependencies have been fetched'
     ].join('\n')
 
     const compact = textOf(
@@ -122,9 +121,20 @@ describe('elixir result rendering', () => {
 
     expect(compact).toContain('earlier lines')
     expect(compact).toContain('Resolution completed in 0.1s')
-    expect(compact).toContain('* Getting pi_bridge (Hex package)')
-    expect(expanded).toContain('[pi-elixir] Added')
-    expect(expanded).toContain('$ mix deps.get')
+    expect(compact).toContain('All dependencies have been fetched')
+    expect(expanded).toContain('$ mix do deps.get')
+  })
+
+  it('renders post-startup running bridge status without stale preparing text', () => {
+    const result = {
+      content: [{ type: 'text' as const, text: 'Running iex in ~/project...' }],
+      details: { bridge: { cwd: '/home/dannote/project', source: 'workspace', phase: 'running' } }
+    } as AgentToolResult<unknown>
+
+    const compact = textOf(renderElixirResult(result, { expanded: false, isPartial: true }, theme))
+
+    expect(compact).toContain('Elixir BEAM · running · current Mix project')
+    expect(compact).not.toContain('preparing')
   })
 
   it('uses structured compact inspect previews without expansion noise when they fit', () => {

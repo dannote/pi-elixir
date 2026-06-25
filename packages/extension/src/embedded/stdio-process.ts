@@ -1,14 +1,13 @@
 import * as childProcess from 'node:child_process'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
-  clearIncompatibleDependency,
   clearUnavailable,
   connectionCache,
   emitStatusChange,
   invalidateCache,
-  markIncompatibleDependency,
   markUnavailable
 } from '#src/connection/status.ts'
 import { recordDiagnostic, withDiagnosticSpan } from '#src/diagnostics.ts'
@@ -23,9 +22,8 @@ import type {
   ToolArgs,
   ToolResult
 } from '#src/protocol/types.ts'
-import { isPiBridgeVersionCompatible, piBridgeVersionMismatchMessage } from '#src/version.ts'
-
-const START_STDIO_EXPR = 'Pi.Transport.Stdio.start()'
+const BRIDGE_CWD = fileURLToPath(new URL('../../../bridge', import.meta.url))
+const STDIO_LAUNCHER = fileURLToPath(new URL('../../scripts/stdio_launcher.exs', import.meta.url))
 const TOOL_CALL_TIMEOUT_MS = 120_000
 const STARTUP_OUTPUT_PREVIEW_CHARS = 8_000
 const STARTUP_OUTPUT_CHUNK_CHARS = 2_000
@@ -181,7 +179,6 @@ function markReady(cwd: string, entry: EmbeddedProcess, url?: string): void {
     stderrBytes: entry.stderrBytes,
     stderrPreview: entry.stderrPreview.join('\n')
   })
-  clearIncompatibleDependency(cwd)
   clearUnavailable(cwd)
   invalidateCache(cwd)
   emitStatusChange(cwd, 'embedded')
@@ -263,20 +260,6 @@ async function handleBridgeRequest(
 
 function handleMessage(cwd: string, entry: EmbeddedProcess, message: StdioMessage): void {
   if (message.type === 'ready') {
-    if (message.info && !isPiBridgeVersionCompatible(message.info.version)) {
-      const error = piBridgeVersionMismatchMessage(message.info.version)
-      bridgeInfo.set(cwd, message.info)
-      markIncompatibleDependency(cwd, error)
-      embeddedFailed.add(cwd)
-      recordDiagnostic('embedded_incompatible', cwd, {
-        version: message.info.version,
-        error
-      })
-      emitStatusChange(cwd, 'incompatible')
-      stopEmbedded(cwd)
-      return
-    }
-
     if (message.info) bridgeInfo.set(cwd, message.info)
     markReady(cwd, entry)
     return
@@ -316,13 +299,6 @@ function appendStartupOutput(entry: EmbeddedProcess, text: string): void {
 function handleStdout(cwd: string, entry: EmbeddedProcess, chunk: Buffer): void {
   entry.buffer += chunk.toString()
 
-  if (entry.buffer.includes('PI_MCP_READY')) {
-    const port = entry.buffer.match(/port=(\d+)/)?.[1]
-    markReady(cwd, entry, port ? `http://127.0.0.1:${port}/mcp` : undefined)
-    entry.buffer = ''
-    return
-  }
-
   while (true) {
     const newline = entry.buffer.indexOf('\n')
     if (newline === -1) return
@@ -330,12 +306,6 @@ function handleStdout(cwd: string, entry: EmbeddedProcess, chunk: Buffer): void 
     const line = entry.buffer.slice(0, newline).trim()
     entry.buffer = entry.buffer.slice(newline + 1)
     if (!line) continue
-
-    if (line.includes('PI_MCP_READY')) {
-      const port = line.match(/port=(\d+)/)?.[1]
-      markReady(cwd, entry, port ? `http://127.0.0.1:${port}/mcp` : undefined)
-      continue
-    }
 
     const message = parseMessage(line)
     if (message) handleMessage(cwd, entry, message)
@@ -348,7 +318,7 @@ export function embeddedStartupTranscript(cwd: string): string | null {
   if (!entry || entry.ready) return null
 
   const output = entry.startupOutputPreview.join('\n').trim()
-  return output ? `$ mix run --no-halt -e '<stdio-start>'\n\n${output}` : null
+  return output ? `$ mix do deps.get + run --no-halt <stdio-launcher>\n\n${output}` : null
 }
 
 function mixChildEnv(): NodeJS.ProcessEnv {
@@ -402,14 +372,20 @@ export function startEmbeddedInBackground(cwd: string): void {
   }
 
   recordDiagnostic('embedded_start', cwd, {
-    command: 'mix run --no-halt -e <stdio-start>',
+    command: 'mix do deps.get + run --no-halt <stdio-launcher>',
+    bridgeCwd: BRIDGE_CWD,
+    targetCwd: cwd,
     mixEnv: 'dev'
   })
-  const proc = childProcess.spawn('mix', ['run', '--no-halt', '-e', START_STDIO_EXPR], {
-    cwd,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: mixChildEnv()
-  })
+  const proc = childProcess.spawn(
+    'mix',
+    ['do', 'deps.get', '+', 'run', '--no-halt', STDIO_LAUNCHER],
+    {
+      cwd: BRIDGE_CWD,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...mixChildEnv(), PI_ELIXIR_TARGET_CWD: cwd }
+    }
+  )
   unrefChildProcess(proc)
 
   const entry: EmbeddedProcess = {

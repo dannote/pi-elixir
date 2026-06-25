@@ -21,6 +21,7 @@
     "packages/bridge/lib",
     "packages/bridge/docs",
     "packages/bridge/mix.exs",
+    "packages/bridge/mix.lock",
     "packages/bridge/README.md"
   ],
   "scripts": {

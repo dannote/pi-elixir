@@ -6,7 +6,6 @@ defmodule Pi.Transport.Stdio do
 
   alias Pi.Bridge.Info
   alias Pi.LLM.Broker
-  alias Pi.MCP.Tools
   alias Pi.Plugin.Event
   alias Pi.Plugin.Manager
   alias Pi.Protocol.Call
@@ -20,6 +19,7 @@ defmodule Pi.Transport.Stdio do
   alias Pi.Protocol.Response
   alias Pi.Protocol.Result
   alias Pi.Skill.Loader
+  alias Pi.Tool.Dispatch
 
   def emit_request(id, op, payload) when is_binary(id) and is_atom(op) and is_map(payload) do
     emit(%Request{type: :request, id: id, op: op, payload: payload})
@@ -189,7 +189,7 @@ defmodule Pi.Transport.Stdio do
     {:ok, encode_structs(Info.runtime_apis())}
   end
 
-  defp dispatch(name, args), do: Tools.dispatch(name, args)
+  defp dispatch(name, args), do: Dispatch.dispatch(name, args)
 
   defp run_plugin_command("quack" <> _rest = name, args) do
     case Manager.run_command(name, args) do

@@ -4,8 +4,7 @@ This tiny Mix project is both a playground and an integration-test fixture for p
 
 It demonstrates:
 
-- path dependency on `pi_bridge`
-- embedded stdio startup
+- extension-owned bundled `pi_bridge` sidecar startup
 - executable skill discovery from `priv/skills`
 - plugin discovery from `priv/pi_plugins`
 - BEAM-initiated `Pi.LLM` requests through the extension
@@ -13,6 +12,6 @@ It demonstrates:
 Run manually:
 
 ```sh
-mix deps.get
-mix run --no-halt -e 'Pi.Transport.Stdio.start()'
+cd ../../bridge
+PI_ELIXIR_TARGET_CWD=../fixtures/demo_project mix do deps.get + run --no-halt ../extension/scripts/stdio_launcher.exs
 ```

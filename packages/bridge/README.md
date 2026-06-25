@@ -4,17 +4,9 @@ BEAM runtime bridge for [pi](https://github.com/earendil-works/pi-coding-agent) 
 
 `pi_bridge` is inspired by [Vibe](https://github.com/elixir-vibe/vibe): keep the model-facing surface small, but let trusted Elixir code operate from inside the running BEAM.
 
-## Installation
+## Runtime model
 
-```elixir
-def deps do
-  [
-    {:pi_bridge, "== 0.6.21", only: :dev}
-  ]
-end
-```
-
-`pi_bridge` is intended for development-time agent tooling. The dependency is exact-versioned because the npm extension and Hex bridge are released together and share a stdio protocol.
+`pi_bridge` is bundled and started by the `pi-elixir` extension as an extension-owned sidecar. Target projects do not need to add `:pi_bridge` to `mix.exs`; the sidecar loads the target Mix project context and communicates with pi over stdio.
 
 ## Public API ergonomics
 

@@ -153,7 +153,7 @@ Reruns increment `runCount` and update `completedAt`. Cancelled sessions also se
 
 ## Private BEAM session controls
 
-The extension exposes session control through private bridge-native MCP tools and slash commands, not model-facing tools. The slash commands dispatch to these calls:
+The extension exposes session control through private bridge-native stdio tools and slash commands, not model-facing tools. The slash commands dispatch to these calls:
 
 ```json
 {
@@ -211,23 +211,4 @@ Tool hooks use strict hook payload shapes before dispatching to plugin callbacks
 
 ```json
 { "type": "result", "id": 3, "text": "{\"block\":\"blocked by plugin\"}", "isError": false }
-```
-
-## MCP JSON-RPC
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": { "name": "project_eval", "arguments": { "code": "1 + 1" } }
-}
-```
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": { "content": [{ "type": "text", "text": "2" }] }
-}
 ```

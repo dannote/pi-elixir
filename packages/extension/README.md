@@ -6,8 +6,8 @@ BEAM runtime tools for [pi](https://github.com/earendil-works/pi-coding-agent). 
 
 ```text
 packages/
-  extension/     # npm/pi package: TypeScript extension, tools, skill docs, embedded server launcher
-  bridge/       # Mix package: Pi facade, eval runtime, stdio transport, optional MCP HTTP server
+  extension/     # npm/pi package: TypeScript extension, tools, skill docs, stdio launcher
+  bridge/       # Mix package: Pi facade, eval runtime, stdio transport
 ```
 
 The npm package is still the user-facing install target. The `pi_bridge` Mix package is bundled by the extension and keeps Elixir runtime code in normal Mix/lib/test structure.
@@ -18,45 +18,25 @@ The npm package is still the user-facing install target. The `pi_bridge` Mix pac
 pi install npm:pi-elixir
 ```
 
-Works with Phoenix apps, libraries, monorepos with a nested Mix project, and other Mix projects. When a pi tool needs the embedded server and the project does not have Pi BEAM tools installed, pi asks for confirmation, adds a dev-only exact `:pi_bridge` dependency to `mix.exs`, runs `mix deps.get`, then starts the server:
-
-```elixir
-{:pi_bridge, "== 0.6.21", only: :dev}
-```
-
-The exact version is deliberate: the TypeScript extension and BEAM bridge are released together and must speak the same stdio protocol. If the installed `pi_bridge` version differs from the extension version, pi reports the mismatch and asks you to update the Mix dependency.
+Works with Phoenix apps, libraries, monorepos with a nested Mix project, and other Mix projects. When a pi tool needs the embedded server, pi starts an extension-owned BEAM sidecar from the bundled `pi_bridge` Mix project and loads the target project's Mix context over stdio. It does not add `:pi_bridge` to the target project's `mix.exs`.
 
 Check the current bridge quickly with `/elixir:status`. Use `/elixir:doctor` for full environment and startup diagnostics.
 
 ## How it connects
 
-The normal path is embedded stdio. The extension starts `Pi.Transport.Stdio` in the Mix project and sends line-delimited protocol messages over the child process pipes. If Pi BEAM tools are missing, the agent asks before editing `mix.exs` and running `mix deps.get`.
-
-HTTP MCP endpoints are advanced/debug escape hatches. Resolution order:
-
-1. **Explicit HTTP MCP endpoint** — `PI_MCP_URL`, only when manually configured.
-2. **Discovered HTTP MCP endpoint** — probes local dev ports and matches `project_name` to the `app:` in `mix.exs`.
-3. **Embedded stdio transport** — default fallback inside the project.
+The normal path is embedded stdio. The extension starts bundled `Pi.Transport.Stdio` from the extension-owned bridge sidecar, loads the target Mix project code paths, and sends line-delimited protocol messages over the child process pipes. Target projects are not mutated.
 
 Status bar output is intentionally transport-focused and actionable:
 
 | Status | Meaning |
 |---|---|
-| `⬡ BEAM` | Connected to an external or discovered BEAM MCP endpoint, such as a Phoenix/Tidewave server whose `project_name` matches `mix.exs` `app:`. |
 | `⬡ BEAM (embedded)` | Connected to the extension-owned stdio BEAM running `Pi.Transport.Stdio` inside this Mix project. |
 | `⬡ BEAM starting…` | The embedded stdio process has been launched and is compiling/booting; retry the tool after it reaches ready. |
-| `⬡ BEAM tools missing` | This Mix project does not yet depend on `:pi_bridge`; the first BEAM tool call can prompt to add the dev-only dependency and run `mix deps.get`. |
-| `⬡ BEAM offline` | No BEAM connection is available: no matching external endpoint, embedded fallback disabled, not a Mix project, or embedded startup failed after tools were installed. |
+| `⬡ BEAM offline` | No BEAM connection is available: embedded fallback disabled, not a Mix project, or embedded sidecar startup failed. |
 
 It does **not** show package versions, optional integration guesses, or project telemetry such as Phoenix/Ecto/Oban/Volt/Iconify presence. Put those checks in explicit `elixir_eval` snippets, project prompts, or skills.
 
 ### Configuration
-
-Advanced/debug only: override the connection URL with a manually exposed HTTP MCP endpoint:
-
-```sh
-export PI_MCP_URL=http://localhost:4001/mcp
-```
 
 Disable the embedded fallback:
 

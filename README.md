@@ -34,19 +34,7 @@ Use full diagnostics when setup looks wrong:
 /elixir:doctor
 ```
 
-In each Mix project that should use BEAM tools, install the dev-only bridge dependency:
-
-```text
-/elixir:install
-```
-
-That adds an exact-versioned dependency such as:
-
-```elixir
-{:pi_bridge, "== <pi-elixir-version>", only: :dev}
-```
-
-The exact version matters: npm `pi-elixir` and Hex `pi_bridge` are released together and must speak the same protocol. If you skip `/elixir:install`, the first Elixir tool call can still prompt to add the dependency.
+No per-project bridge dependency is required. `pi-elixir` starts an extension-owned BEAM sidecar in the target Mix project and loads the bundled `pi_bridge` over stdio without editing your `mix.exs`.
 
 ## Daily workflow
 
@@ -165,21 +153,14 @@ Unsafe or oversized bindings are handled defensively: PIDs/ports/refs/functions 
 
 ## Connection model
 
-The normal path is an embedded stdio bridge started inside the Mix project with `Pi.Transport.Stdio.start()`. HTTP MCP endpoints are advanced/debug escape hatches.
-
-Resolution order:
-
-1. `PI_MCP_URL`, only when explicitly configured for a manually exposed HTTP MCP endpoint.
-2. Discovered local HTTP MCP endpoint matching the Mix app name.
-3. Embedded stdio transport inside the project.
+The normal and only bridge path is an extension-owned stdio sidecar. The extension starts bundled `Pi.Transport.Stdio`, loads the target Mix project context, and communicates over the child process pipes.
 
 ```sh
-# Advanced/debug only: bypass embedded stdio and use your own HTTP MCP endpoint.
-export PI_MCP_URL=http://localhost:4001/mcp
+# Disable the embedded stdio sidecar.
 export PI_DISABLE_EMBEDDED=1
 ```
 
-Status is transport-focused and actionable: external/embedded/starting/missing/incompatible/offline. It does **not** show project package versions or optional integration guesses; project-specific checks belong in explicit eval snippets, prompts, and skills.
+Status is transport-focused and actionable: embedded/starting/offline. It does **not** show project package versions or optional integration guesses; project-specific checks belong in explicit eval snippets, prompts, and skills.
 
 Feature flags are escape hatches for noisy, sensitive, or experimental environments:
 
@@ -217,7 +198,7 @@ cd my_lib
 pi install npm:pi-elixir
 ```
 
-VibeKit provides the project quality baseline (`mix ci`, Credo strict with ExSlop, Dialyzer, ExDNA, and Reach). pi-elixir provides the live BEAM tools used by agents while they work inside that project. Run `/elixir:install` once per project to add the exact matching dev-only `:pi_bridge` dependency.
+VibeKit provides the project quality baseline (`mix ci`, Credo strict with ExSlop, Dialyzer, ExDNA, and Reach). pi-elixir provides the live BEAM tools used by agents while they work inside that project through an extension-owned sidecar; no project `:pi_bridge` dependency is required.
 
 ## Troubleshooting setup
 
@@ -226,9 +207,8 @@ VibeKit provides the project quality baseline (`mix ci`, Credo strict with ExSlo
 | `Mix cwd: not found` | Start pi from a Mix project directory, or from a supported repo root with a known nested Mix project. |
 | `Elixir is not installed or not available on PATH` | Start pi from a shell where Elixir/Mix are available. If you just changed `mise`/`asdf` versions, restart pi. |
 | Stale `mise` PATH warning | Restart the shell/pi process so removed tool install paths disappear from `PATH`. |
-| `pi_bridge dependency: missing` | Run `/elixir:install` in the Mix project. |
+| `pi_bridge dependency: not required` | Expected: the bridge is extension-owned and loaded through the sidecar. |
 | Embedded BEAM exited before ready | Fix the Mix/Elixir error shown in doctor, then run `/elixir:restart`. Wrong Elixir versions surface here as the real Mix error. |
-| `pi_bridge version mismatch` | Update the Mix dependency to the exact version expected by installed `pi-elixir`, then run `mix deps.get`. |
 | Tool registration conflicts with another `pi-elixir` path | Remove the duplicate install, usually `pi remove npm:pi-elixir`, then install only the checkout or only the npm package. |
 
 ## Local development

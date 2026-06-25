@@ -16,8 +16,6 @@ defmodule PiDemoProject.MixProject do
   end
 
   defp deps do
-    [
-      {:pi_bridge, path: "../../bridge", only: [:dev, :test]}
-    ]
+    []
   end
 end

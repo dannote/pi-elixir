@@ -51,20 +51,7 @@ describe('resolveBeamToolCwd', () => {
     dir = undefined
   })
 
-  it('falls back to the bundled pi-elixir bridge from tool source metadata', () => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-elixir-bundled-'))
-    const bridge = path.join(dir, 'packages/bridge')
-    fs.mkdirSync(bridge, { recursive: true })
-    fs.writeFileSync(path.join(bridge, 'mix.exs'), 'defmodule PiBridge.MixProject do end\n')
-
-    expect(
-      resolveBeamToolCwd(piWithToolSource(dir), 'elixir_eval', {}, {
-        cwd: path.join(dir, '..')
-      } as never)
-    ).toBe(bridge)
-  })
-
-  it('resolves a Mix project from an absolute path argument before bundled fallback', () => {
+  it('resolves a Mix project from an absolute path argument', () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-elixir-path-cwd-'))
     const project = path.join(dir, 'apps/demo')
     const file = path.join(project, 'lib/demo.ex')
