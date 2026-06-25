@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import {
   callEmbeddedTool,
+  embeddedStartupTranscript,
   getBridgeInfo,
   isEmbeddedReady,
   startEmbeddedInBackground,
@@ -14,24 +15,31 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 const PROJECT_DIR =
   process.env.PI_ELIXIR_INTEGRATION_PROJECT ??
   path.resolve(__dirname, '../../../fixtures/demo_project')
+const BRIDGE_DIR = path.resolve(__dirname, '../../../bridge')
 const STARTUP_TIMEOUT = 20_000
 const DEPS_TIMEOUT = 10_000
 const COMPILE_TIMEOUT = 60_000
-const HOOK_TIMEOUT = DEPS_TIMEOUT + COMPILE_TIMEOUT + STARTUP_TIMEOUT + 5_000
+const HOOK_TIMEOUT = DEPS_TIMEOUT * 2 + COMPILE_TIMEOUT * 2 + STARTUP_TIMEOUT + 5_000
 
-function ensureCompiledProject(): void {
-  if (!fs.existsSync(path.join(PROJECT_DIR, 'deps'))) {
+function ensureCompiledMixProject(cwd: string): void {
+  if (!fs.existsSync(path.join(cwd, 'deps'))) {
     execSync('mix deps.get', {
-      cwd: PROJECT_DIR,
+      cwd,
       stdio: 'pipe',
       timeout: DEPS_TIMEOUT
     })
   }
+
   execSync('mix compile', {
-    cwd: PROJECT_DIR,
+    cwd,
     stdio: 'pipe',
     timeout: COMPILE_TIMEOUT
   })
+}
+
+function ensureCompiledProject(): void {
+  ensureCompiledMixProject(BRIDGE_DIR)
+  ensureCompiledMixProject(PROJECT_DIR)
 }
 
 function hasElixir(): boolean {
@@ -63,9 +71,12 @@ function waitForReady(cwd: string, timeout = STARTUP_TIMEOUT): Promise<void> {
 
       if (Date.now() >= deadline) {
         const info = getBridgeInfo(cwd)
+        const transcript = embeddedStartupTranscript(cwd)
+        stopEmbedded(cwd)
         reject(
           new Error(
-            `Timed out waiting for embedded stdio process; bridge info: ${JSON.stringify(info ?? null)}`
+            `Timed out waiting for embedded stdio process; bridge info: ${JSON.stringify(info ?? null)}` +
+              (transcript ? `\n\n${transcript}` : '')
           )
         )
         return
