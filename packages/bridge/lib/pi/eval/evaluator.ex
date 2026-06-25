@@ -21,6 +21,16 @@ defmodule Pi.Eval.Evaluator do
             restore_path: nil,
             loaded_path: nil
 
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    %{
+      id: {__MODULE__, Keyword.fetch!(opts, :session_id)},
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :temporary,
+      type: :worker
+    }
+  end
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     session_id = Keyword.fetch!(opts, :session_id)

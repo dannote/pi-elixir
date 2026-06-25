@@ -226,6 +226,12 @@ Output truncated to ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)
       ),
       timeout: Type.Optional(
         Type.Integer({ description: 'Timeout in ms (default: 30000 trusted, 5000 sandbox)' })
+      ),
+      reload: Type.Optional(
+        Type.Boolean({
+          description:
+            'Compile/reload project code before evaluating. Defaults to false to keep introspection fast and avoid compile-time hangs.'
+        })
       )
     }),
     renderEvalCall('iex'),

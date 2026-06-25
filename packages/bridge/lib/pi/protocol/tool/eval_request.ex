@@ -3,13 +3,22 @@ defmodule Pi.Protocol.Tool.EvalRequest do
 
   use JSONCodec, fast_path: :json
 
-  defstruct [:code, :session_id, :state_path, :restore_path, timeout: nil, mode: :trusted]
+  defstruct [
+    :code,
+    :session_id,
+    :state_path,
+    :restore_path,
+    timeout: nil,
+    mode: :trusted,
+    reload: false
+  ]
 
   @type mode :: :trusted | :sandbox
   @type t :: %__MODULE__{
           code: String.t(),
           timeout: non_neg_integer() | nil,
           mode: mode(),
+          reload: boolean(),
           session_id: String.t() | nil,
           state_path: String.t() | nil,
           restore_path: String.t() | nil

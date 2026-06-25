@@ -113,7 +113,7 @@ defmodule Pi.MCP.Tools do
   end
 
   defp eval_opts(request, timeout) do
-    [timeout: timeout]
+    [timeout: timeout, reload: request.reload]
     |> maybe_put(:session_id, request.session_id)
     |> maybe_put(:state_path, request.state_path)
     |> maybe_put(:restore_path, request.restore_path)

@@ -138,6 +138,31 @@ function failPending(entry: EmbeddedProcess, error: Error): void {
   entry.pending.clear()
 }
 
+function toolTimeoutMessage(name: string, elapsedMs: number, entry: EmbeddedProcess): string {
+  const stderr = entry.stderrPreview.join('\n').trim()
+  const lines = [
+    `Embedded BEAM tool call timed out after ${elapsedMs}ms while waiting for ${name}.`,
+    'The embedded BEAM process was stopped so the next tool call can start a fresh bridge.'
+  ]
+
+  if (stderr) {
+    lines.push('', 'Recent embedded BEAM stderr:', stderr)
+  }
+
+  return lines.join('\n')
+}
+
+function terminateTimedOutEmbedded(cwd: string, entry: EmbeddedProcess, id: number): void {
+  if (embeddedProcesses.get(cwd) !== entry) return
+
+  entry.pending.delete(id)
+  embeddedProcesses.delete(cwd)
+  connectionCache.delete(cwd)
+  failPending(entry, new Error('Embedded BEAM process stopped after a tool call timeout'))
+  entry.proc.kill()
+  emitStatusChange(cwd, null)
+}
+
 function parseMessage(line: string): StdioMessage | null {
   try {
     const message: unknown = JSON.parse(line)
@@ -533,10 +558,9 @@ export function callEmbeddedTool(
             stderrBytes: entry.stderrBytes,
             stderrPreview: entry.stderrPreview.join('\n')
           })
-          resolveOnce({
-            text: `Embedded BEAM tool call timed out after ${elapsedMs}ms while waiting for ${name}.`,
-            isError: true
-          })
+          const text = toolTimeoutMessage(name, elapsedMs, entry)
+          resolveOnce({ text, isError: true })
+          terminateTimedOutEmbedded(cwd, entry, id)
         }, TOOL_CALL_TIMEOUT_MS)
 
         const cleanup = () => {
