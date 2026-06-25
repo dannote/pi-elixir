@@ -325,7 +325,7 @@ function mixChildEnv(): NodeJS.ProcessEnv {
   const mixHome = path.join(os.homedir(), '.mix')
   return {
     ...process.env,
-    MIX_ENV: 'dev',
+    MIX_ENV: process.env.PI_ELIXIR_MIX_ENV ?? 'dev',
     MIX_HOME: mixHome,
     MIX_ARCHIVES: path.join(mixHome, 'archives')
   }

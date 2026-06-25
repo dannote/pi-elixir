@@ -21,10 +21,13 @@ const DEPS_TIMEOUT = 10_000
 const COMPILE_TIMEOUT = 60_000
 const HOOK_TIMEOUT = DEPS_TIMEOUT * 2 + COMPILE_TIMEOUT * 2 + STARTUP_TIMEOUT + 5_000
 
-function ensureCompiledMixProject(cwd: string): void {
+function ensureCompiledMixProject(cwd: string, mixEnv = 'dev'): void {
+  const env = { ...process.env, MIX_ENV: mixEnv }
+
   if (!fs.existsSync(path.join(cwd, 'deps'))) {
     execSync('mix deps.get', {
       cwd,
+      env,
       stdio: 'pipe',
       timeout: DEPS_TIMEOUT
     })
@@ -32,13 +35,24 @@ function ensureCompiledMixProject(cwd: string): void {
 
   execSync('mix compile', {
     cwd,
+    env,
     stdio: 'pipe',
     timeout: COMPILE_TIMEOUT
   })
 }
 
+function withEnv(name: string, value: string): () => void {
+  const original = process.env[name]
+  process.env[name] = value
+
+  return () => {
+    if (original === undefined) delete process.env[name]
+    else process.env[name] = original
+  }
+}
+
 function ensureCompiledProject(): void {
-  ensureCompiledMixProject(BRIDGE_DIR)
+  ensureCompiledMixProject(BRIDGE_DIR, 'test')
   ensureCompiledMixProject(PROJECT_DIR)
 }
 
@@ -97,9 +111,11 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
   () => {
     const originalComplete = process.env.PI_TEST_LLM_COMPLETE_RESPONSE
     const originalStream = process.env.PI_TEST_LLM_STREAM_RESPONSE
+    let restoreMixEnv: (() => void) | undefined
 
     beforeAll(async () => {
       ensureCompiledProject()
+      restoreMixEnv = withEnv('PI_ELIXIR_MIX_ENV', 'test')
       process.env.PI_TEST_LLM_COMPLETE_RESPONSE = 'extension fake completion'
       process.env.PI_TEST_LLM_STREAM_RESPONSE = 'stream |from |extension'
       startEmbeddedInBackground(PROJECT_DIR)
@@ -113,6 +129,7 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
       if (originalStream === undefined) delete process.env.PI_TEST_LLM_STREAM_RESPONSE
       else process.env.PI_TEST_LLM_STREAM_RESPONSE = originalStream
 
+      restoreMixEnv?.()
       stopEmbedded(PROJECT_DIR)
     })
 
