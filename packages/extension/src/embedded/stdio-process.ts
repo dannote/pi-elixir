@@ -33,6 +33,7 @@ const STARTUP_OUTPUT_PREVIEW_CHARS = 8_000
 const STARTUP_OUTPUT_CHUNK_CHARS = 2_000
 const STDERR_PREVIEW_CHARS = 2_000
 const STDERR_PREVIEW_CHUNK_CHARS = 500
+const DEPS_GET_TIMEOUT_MS = 120_000
 
 interface EmbeddedProcess {
   proc: childProcess.ChildProcess
@@ -328,6 +329,29 @@ export function embeddedStartupTranscript(cwd: string): string | null {
   return output ? `$ mix run --no-halt -e '<stdio-start>'\n\n${output}` : null
 }
 
+function ensureBundledBridgeDeps(projectCwd: string, bridgeCwd: string): string | null {
+  try {
+    childProcess.execFileSync('mix', ['deps.get'], {
+      cwd: bridgeCwd,
+      env: mixChildEnv(projectCwd),
+      stdio: 'pipe',
+      timeout: DEPS_GET_TIMEOUT_MS
+    })
+    return null
+  } catch (error) {
+    const childError = error as {
+      stdout?: Buffer | string
+      stderr?: Buffer | string
+      message?: string
+    }
+    const output = [childError.stdout, childError.stderr]
+      .map((chunk) => chunk?.toString().trim())
+      .filter(Boolean)
+      .join('\n')
+    return output || childError.message || 'mix deps.get failed for bundled pi_bridge'
+  }
+}
+
 function mixChildEnv(projectCwd: string): NodeJS.ProcessEnv {
   const mixHome = path.join(os.homedir(), '.mix')
   return {
@@ -384,11 +408,24 @@ export function startEmbeddedInBackground(cwd: string): void {
   }
 
   const bridgeCwd = bundledBridgeCwd()
+  const depsError = ensureBundledBridgeDeps(cwd, bridgeCwd)
+  if (depsError) {
+    markUnavailable(cwd, depsError)
+    embeddedFailed.add(cwd)
+    recordDiagnostic('embedded_start_skipped', cwd, {
+      reason: 'bundled_bridge_deps_unavailable',
+      bridgeCwd,
+      error: depsError
+    })
+    emitStatusChange(cwd, 'unavailable')
+    return
+  }
+
   recordDiagnostic('embedded_start', cwd, {
     command: 'mix run --no-halt -e <stdio-start>',
     bridgeCwd,
     projectCwd: cwd,
-    mixEnv: 'dev'
+    mixEnv: mixChildEnv(cwd).MIX_ENV
   })
   const proc = childProcess.spawn('mix', ['run', '--no-halt', '-e', START_STDIO_EXPR], {
     cwd: bridgeCwd,

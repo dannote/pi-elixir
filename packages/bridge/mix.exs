@@ -4,7 +4,7 @@ defmodule PiBridge.MixProject do
   def project do
     [
       app: :pi_bridge,
-      version: "0.7.0",
+      version: "0.7.1",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       description: "BEAM runtime bridge for pi development agents",

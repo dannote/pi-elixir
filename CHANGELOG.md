@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.7.1 - 2026-07-07
+
+### Fixed
+
+- Published npm installs now run `mix deps.get` for the bundled isolated bridge before starting embedded stdio, so first use no longer fails with missing bundled bridge dependencies. The integration smoke test starts the bridge in the already-compiled test Mix environment instead of masking cold-start problems with a longer timeout.
+- The npm package now includes `packages/bridge/mix.lock` so bundled bridge dependency resolution is reproducible.
+
 ## 0.7.0 - 2026-07-06
 
 ### Changed
