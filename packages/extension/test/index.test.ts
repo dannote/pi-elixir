@@ -9,8 +9,13 @@ vi.mock('../src/connection/resolver.ts', () => ({
 }))
 
 vi.mock('../src/connection/status.ts', () => ({
+  getIncompatibleDependency: vi.fn(),
   getUnavailableReason: vi.fn(),
   onStatusChange: vi.fn()
+}))
+
+vi.mock('../src/mix/installer.ts', () => ({
+  ensurePiBeamDependency: vi.fn()
 }))
 
 vi.mock('../src/embedded/stdio-process.ts', () => ({
@@ -27,9 +32,10 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 
 import { callTool, resolveUrl, getConnectionKind } from '#src/connection/resolver.ts'
-import { onStatusChange } from '#src/connection/status.ts'
+import { getIncompatibleDependency, onStatusChange } from '#src/connection/status.ts'
 import { onBridgeBusEvent, onBridgeRequest, stopEmbedded } from '#src/embedded/stdio-process.ts'
 import extension from '#src/index.js'
+import { ensurePiBeamDependency } from '#src/mix/installer.ts'
 
 let tempRoot: string
 
@@ -89,12 +95,34 @@ describe('extension registration', () => {
     vi.clearAllMocks()
     vi.mocked(resolveUrl).mockResolvedValue(null)
     vi.mocked(getConnectionKind).mockReturnValue('starting')
+    vi.mocked(getIncompatibleDependency).mockReturnValue(undefined)
     vi.mocked(onStatusChange).mockImplementation((_listener) => vi.fn())
+    vi.mocked(ensurePiBeamDependency).mockResolvedValue(true)
   })
 
   afterEach(() => {
     vi.useRealTimers()
+    delete process.env.PI_MCP_URL
+    delete process.env.PI_ELIXIR_AUTO_INSTALL
     fs.rmSync(tempRoot, { recursive: true, force: true })
+  })
+
+  it('registers elixir install command', async () => {
+    const cwd = makeProject('install')
+    const { pi } = fakePi()
+    extension(pi as any)
+
+    const command = pi.registerCommand.mock.calls.find(([name]) => name === 'elixir:install')?.[1]
+    expect(command).toBeTruthy()
+
+    const ctx = fakeCtx(cwd)
+    await command.handler('', ctx)
+
+    expect(ensurePiBeamDependency).toHaveBeenCalledWith(cwd, {
+      confirmInstall: expect.any(Function),
+      onProgress: expect.any(Function)
+    })
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Pi BEAM tools are installed', 'info')
   })
 
   it('registers elixir doctor and status commands', async () => {
@@ -166,7 +194,7 @@ describe('extension registration', () => {
     )
   })
 
-  it('runs quack against the local embedded bridge', async () => {
+  it('runs quack against the local embedded bridge instead of external MCP', async () => {
     const project = makeProject('project')
     const { pi } = fakePi()
     extension(pi as any)
@@ -179,7 +207,7 @@ describe('extension registration', () => {
     const command = pi.registerCommand.mock.calls.find(([name]) => name === 'elixir:quack')?.[1]
     await command.handler('status', fakeCtx(project))
 
-    expect(resolveUrl).toHaveBeenCalledWith(project)
+    expect(resolveUrl).toHaveBeenCalledWith(project, { ignoreExternal: true })
     expect(callTool).toHaveBeenCalledWith('stdio:project', 'pi_plugin_command', {
       name: 'quack',
       args: 'status'
@@ -193,6 +221,7 @@ describe('extension status lifecycle', () => {
     vi.clearAllMocks()
     vi.mocked(resolveUrl).mockResolvedValue(null)
     vi.mocked(getConnectionKind).mockReturnValue('starting')
+    vi.mocked(getIncompatibleDependency).mockReturnValue(undefined)
     vi.mocked(onStatusChange).mockImplementation((_listener) => vi.fn())
   })
 
@@ -267,6 +296,104 @@ describe('extension status lifecycle', () => {
     expect(onStatusChange).toHaveBeenCalledTimes(1)
   })
 
+  it('returns native tool error for incompatible Elixir bridge', async () => {
+    const projectA = makeProject('project-a')
+    const message =
+      'pi_bridge version mismatch: installed 0.6.2, but pi-elixir extension expects 0.6.0.'
+    vi.mocked(resolveUrl).mockResolvedValue(null)
+    vi.mocked(getConnectionKind).mockReturnValue('incompatible')
+    vi.mocked(getIncompatibleDependency).mockReturnValue(message)
+
+    const { pi } = fakePi()
+    extension(pi as any)
+    const tool = pi.registerTool.mock.calls.find(
+      ([registered]) => registered.name === 'elixir_eval'
+    )?.[0]
+
+    const result = await tool.execute(
+      'tool-1',
+      { code: 'Application.spec(:pi_bridge, :vsn)' },
+      undefined,
+      undefined,
+      fakeCtx(projectA)
+    )
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toBe(message)
+  })
+
+  it('allows non-interactive Elixir tool calls to install the bridge dependency', async () => {
+    const projectA = makeProject('project-a')
+    const ctx = fakeCtx(projectA)
+    ctx.hasUI = false
+
+    const { pi } = fakePi()
+    extension(pi as any)
+    const tool = pi.registerTool.mock.calls.find(
+      ([registered]) => registered.name === 'elixir_eval'
+    )?.[0]
+
+    await tool.execute('tool-1', { code: 'Pi.project()' }, undefined, undefined, ctx)
+
+    const options = vi.mocked(resolveUrl).mock.calls[0][1] as Parameters<typeof resolveUrl>[1]
+    await expect(
+      options?.confirmInstall?.({ dependency: ':dep', mixExsPath: 'mix.exs' })
+    ).resolves.toBe(true)
+  })
+
+  it('honors PI_ELIXIR_AUTO_INSTALL=0 for non-interactive Elixir tool calls', async () => {
+    const projectA = makeProject('project-a')
+    const ctx = fakeCtx(projectA)
+    ctx.hasUI = false
+    process.env.PI_ELIXIR_AUTO_INSTALL = '0'
+
+    const { pi } = fakePi()
+    extension(pi as any)
+    const tool = pi.registerTool.mock.calls.find(
+      ([registered]) => registered.name === 'elixir_eval'
+    )?.[0]
+
+    await tool.execute('tool-1', { code: 'Pi.project()' }, undefined, undefined, ctx)
+
+    const options = vi.mocked(resolveUrl).mock.calls[0][1] as Parameters<typeof resolveUrl>[1]
+    await expect(
+      options?.confirmInstall?.({ dependency: ':dep', mixExsPath: 'mix.exs' })
+    ).resolves.toBe(false)
+  })
+
+  it('uses explicit PI_MCP_URL even when session cwd is not a Mix project', async () => {
+    const workspace = makeProject('workspace', false)
+    process.env.PI_MCP_URL = 'http://127.0.0.1:4041/mcp'
+    vi.mocked(resolveUrl).mockResolvedValue({ url: process.env.PI_MCP_URL, kind: 'external' })
+    vi.mocked(callTool).mockResolvedValue({
+      text: JSON.stringify({ kind: 'eval', text: 'ok' }),
+      isError: false
+    })
+
+    const { pi } = fakePi()
+    extension(pi as any)
+    const tool = pi.registerTool.mock.calls.find(
+      ([registered]) => registered.name === 'elixir_eval'
+    )?.[0]
+
+    const result = await tool.execute(
+      'tool-1',
+      { code: 'File.cwd!()' },
+      undefined,
+      undefined,
+      fakeCtx(workspace)
+    )
+
+    expect(result.isError).toBe(false)
+    expect(resolveUrl).toHaveBeenCalledWith(workspace, expect.any(Object))
+    expect(callTool).toHaveBeenCalledWith(
+      'http://127.0.0.1:4041/mcp',
+      'project_eval_structured',
+      expect.objectContaining({ code: 'File.cwd!()' }),
+      undefined
+    )
+  })
+
   it('does not show bridge preparation notice for warm bridge calls', async () => {
     const projectA = makeProject('project-a')
     vi.mocked(resolveUrl).mockResolvedValue({ url: 'stdio:test', kind: 'embedded' })
@@ -338,14 +465,6 @@ describe('extension status lifecycle', () => {
     resolveBridge?.({ url: 'stdio:test', kind: 'embedded' })
     const result = await pending
     expect(result.isError).toBe(false)
-    expect(onUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: [expect.objectContaining({ text: expect.stringContaining('Running iex in') })],
-        details: expect.objectContaining({
-          bridge: expect.objectContaining({ phase: 'running', connection: 'embedded' })
-        })
-      })
-    )
   })
 
   it('waits briefly for an embedded BEAM that is already starting', async () => {
@@ -403,7 +522,7 @@ describe('extension status lifecycle', () => {
     expect(result.isError).toBe(true)
     expect(result.content[0].text).toContain('could not connect to pi_bridge')
     expect(result.content[0].text).toContain('embedded BEAM')
-    expect(result.content[0].text).toContain('/elixir:doctor')
+    expect(result.content[0].text).toContain('use mix phx.server only')
   })
 
   it('returns a direct Elixir installation hint when runtime is unavailable', async () => {

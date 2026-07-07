@@ -33,7 +33,7 @@ defmodule Pi.LogCapture do
   def clear_logs, do: GenServer.call(__MODULE__, :clear_logs)
 
   def log(%{meta: meta, level: level} = event, config) do
-    if meta[:pi_bridge] do
+    if meta[:pi_mcp] do
       :ok
     else
       %{formatter: {formatter_mod, formatter_config}} = config

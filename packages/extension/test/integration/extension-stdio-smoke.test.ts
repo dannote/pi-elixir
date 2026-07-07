@@ -4,7 +4,6 @@ import path from 'node:path'
 
 import {
   callEmbeddedTool,
-  embeddedStartupTranscript,
   getBridgeInfo,
   isEmbeddedReady,
   startEmbeddedInBackground,
@@ -15,45 +14,22 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 const PROJECT_DIR =
   process.env.PI_ELIXIR_INTEGRATION_PROJECT ??
   path.resolve(__dirname, '../../../fixtures/demo_project')
-const BRIDGE_DIR = path.resolve(__dirname, '../../../bridge')
 const STARTUP_TIMEOUT = 20_000
 const DEPS_TIMEOUT = 10_000
 const COMPILE_TIMEOUT = 60_000
-const HOOK_TIMEOUT = DEPS_TIMEOUT * 2 + COMPILE_TIMEOUT * 2 + STARTUP_TIMEOUT + 5_000
+const HOOK_TIMEOUT = DEPS_TIMEOUT + COMPILE_TIMEOUT + STARTUP_TIMEOUT + 5_000
 
-function ensureCompiledMixProject(cwd: string, mixEnv = 'dev'): void {
-  const env = { ...process.env, MIX_ENV: mixEnv }
-
-  if (!fs.existsSync(path.join(cwd, 'deps'))) {
-    execSync('mix deps.get', {
-      cwd,
-      env,
-      stdio: 'pipe',
-      timeout: DEPS_TIMEOUT
-    })
-  }
-
+function ensureCompiledProject(): void {
+  execSync('mix deps.get', {
+    cwd: PROJECT_DIR,
+    stdio: 'pipe',
+    timeout: DEPS_TIMEOUT
+  })
   execSync('mix compile', {
-    cwd,
-    env,
+    cwd: PROJECT_DIR,
     stdio: 'pipe',
     timeout: COMPILE_TIMEOUT
   })
-}
-
-function withEnv(name: string, value: string): () => void {
-  const original = process.env[name]
-  process.env[name] = value
-
-  return () => {
-    if (original === undefined) delete process.env[name]
-    else process.env[name] = original
-  }
-}
-
-function ensureCompiledProject(): void {
-  ensureCompiledMixProject(BRIDGE_DIR, 'test')
-  ensureCompiledMixProject(PROJECT_DIR)
 }
 
 function hasElixir(): boolean {
@@ -85,12 +61,9 @@ function waitForReady(cwd: string, timeout = STARTUP_TIMEOUT): Promise<void> {
 
       if (Date.now() >= deadline) {
         const info = getBridgeInfo(cwd)
-        const transcript = embeddedStartupTranscript(cwd)
-        stopEmbedded(cwd)
         reject(
           new Error(
-            `Timed out waiting for embedded stdio process; bridge info: ${JSON.stringify(info ?? null)}` +
-              (transcript ? `\n\n${transcript}` : '')
+            `Timed out waiting for embedded stdio process; bridge info: ${JSON.stringify(info ?? null)}`
           )
         )
         return
@@ -111,13 +84,13 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
   () => {
     const originalComplete = process.env.PI_TEST_LLM_COMPLETE_RESPONSE
     const originalStream = process.env.PI_TEST_LLM_STREAM_RESPONSE
-    let restoreMixEnv: (() => void) | undefined
+    const originalBridgeMixEnv = process.env.PI_ELIXIR_BRIDGE_MIX_ENV
 
     beforeAll(async () => {
       ensureCompiledProject()
-      restoreMixEnv = withEnv('PI_ELIXIR_MIX_ENV', 'test')
       process.env.PI_TEST_LLM_COMPLETE_RESPONSE = 'extension fake completion'
       process.env.PI_TEST_LLM_STREAM_RESPONSE = 'stream |from |extension'
+      process.env.PI_ELIXIR_BRIDGE_MIX_ENV = 'test'
       startEmbeddedInBackground(PROJECT_DIR)
       await waitForReady(PROJECT_DIR, STARTUP_TIMEOUT)
     }, HOOK_TIMEOUT)
@@ -129,7 +102,9 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
       if (originalStream === undefined) delete process.env.PI_TEST_LLM_STREAM_RESPONSE
       else process.env.PI_TEST_LLM_STREAM_RESPONSE = originalStream
 
-      restoreMixEnv?.()
+      if (originalBridgeMixEnv === undefined) delete process.env.PI_ELIXIR_BRIDGE_MIX_ENV
+      else process.env.PI_ELIXIR_BRIDGE_MIX_ENV = originalBridgeMixEnv
+
       stopEmbedded(PROJECT_DIR)
     })
 
@@ -139,12 +114,13 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
       expect(info?.project).toBe('pi_demo_project')
       expect(info?.transport).toBe('stdio')
       expect(info?.apis?.runtime?.some((api) => api.name === 'llm')).toBe(true)
-      expect(info?.skills?.some((skill) => skill.name === 'demo-skill')).toBe(true)
-      expect(info?.plugins?.some((plugin) => plugin.name === 'DemoPlugin')).toBe(true)
+      expect(info?.skills ?? []).toEqual([])
+      expect(info?.plugins ?? []).toEqual([])
     })
 
     it('routes Pi.LLM.complete through the extension request handler', async () => {
       const result = await callEmbeddedTool(PROJECT_DIR, 'project_eval', {
+        target: 'bridge',
         code: 'Pi.LLM.complete("hello from extension smoke")'
       })
 
@@ -152,32 +128,30 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
       expect(result.text).toContain('extension fake completion')
     })
 
-    it('exposes humane Dev helpers through eval aliases', async () => {
+    it('evaluates ordinary code in the isolated project VM', async () => {
       const result = await callEmbeddedTool(PROJECT_DIR, 'project_eval_structured', {
-        code: 'Dev.status()'
+        code: '{Mix.Project.config()[:app], Code.ensure_loaded?(Pi)}'
       })
 
       expect(result.isError).toBe(false)
       const payload = structuredPayload(result)
-      expect(payload.text).toContain('app: :pi_demo_project')
-      expect(payload.text).toContain('restart_hint')
-      expect(payload.parts?.[0]?.kind).toBe('tree')
-      expect(payload.parts?.[0]?.title).toContain('map with')
+      expect(payload.text).toContain(':pi_demo_project')
     })
 
-    it('compiles the fixture project through Dev.compile', async () => {
+    it('keeps pi-elixir helpers available through explicit bridge target', async () => {
       const result = await callEmbeddedTool(PROJECT_DIR, 'project_eval_structured', {
-        code: 'Dev.compile()'
+        target: 'bridge',
+        code: 'Code.ensure_loaded?(Pi.CodeMap)'
       })
 
       expect(result.isError).toBe(false)
       const payload = structuredPayload(result)
-      expect(payload.text).toContain('{:ok,')
-      expect(payload.text).toContain('count:')
+      expect(payload.text).toContain('true')
     })
 
-    it('renders typed file pipelines as structured table output', async () => {
+    it('renders bridge typed file pipelines as structured table output', async () => {
       const result = await callEmbeddedTool(PROJECT_DIR, 'project_eval_structured', {
+        target: 'bridge',
         code: 'Path.wildcard("lib/**/*.ex") |> Enum.map(&%{path: &1, bytes: File.stat!(&1).size})'
       })
 
@@ -191,6 +165,7 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
 
     it('renders web results as structured document output', async () => {
       const result = await callEmbeddedTool(PROJECT_DIR, 'project_eval_structured', {
+        target: 'bridge',
         code: `%Pi.Web.Result{
           url: "https://example.test",
           final_url: "https://example.test/final",
@@ -217,6 +192,7 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
 
     it('routes Pi.LLM.stream through extension chunk/done messages', async () => {
       const result = await callEmbeddedTool(PROJECT_DIR, 'project_eval', {
+        target: 'bridge',
         code: 'Pi.LLM.stream("stream").stream |> Enum.join()'
       })
 

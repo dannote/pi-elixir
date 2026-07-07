@@ -1,6 +1,6 @@
 {
   "name": "pi-elixir",
-  "version": "0.6.22",
+  "version": "0.7.0",
   "description": "BEAM runtime tools for pi — connects to the running Elixir app for live introspection",
   "keywords": [
     "pi-package"
@@ -21,7 +21,6 @@
     "packages/bridge/lib",
     "packages/bridge/docs",
     "packages/bridge/mix.exs",
-    "packages/bridge/mix.lock",
     "packages/bridge/README.md"
   ],
   "scripts": {

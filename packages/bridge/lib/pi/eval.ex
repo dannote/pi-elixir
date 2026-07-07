@@ -48,35 +48,15 @@ defmodule Pi.Eval do
 
   defp run_eval(code, opts, mode) do
     timeout = Keyword.get(opts, :timeout, 30_000)
-    deadline = deadline(timeout)
 
-    with :ok <- maybe_reload_project(opts, timeout) do
-      remaining_timeout = remaining_timeout(deadline)
+    reload_project()
 
-      case {mode, Keyword.get(opts, :session_id)} do
-        {:structured, session_id} when is_binary(session_id) ->
-          run_stateful_eval(code, opts, remaining_timeout, session_id)
+    case {mode, Keyword.get(opts, :session_id)} do
+      {:structured, session_id} when is_binary(session_id) ->
+        run_stateful_eval(code, opts, timeout, session_id)
 
-        _other ->
-          run_stateless_eval(code, remaining_timeout, mode)
-      end
-    end
-  end
-
-  defp deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
-
-  defp remaining_timeout(deadline) do
-    max(deadline - System.monotonic_time(:millisecond), 0)
-  end
-
-  defp maybe_reload_project(opts, timeout) do
-    if Keyword.get(opts, :reload, false) do
-      await_eval(timeout, fn ->
-        reload_project()
-        :ok
-      end)
-    else
-      :ok
+      _other ->
+        run_stateless_eval(code, timeout, mode)
     end
   end
 
@@ -86,16 +66,12 @@ defmodule Pi.Eval do
            restore_path: Keyword.get(opts, :restore_path)
          ) do
       {:ok, evaluator} ->
-        await_eval(
-          timeout,
-          fn ->
-            Evaluator.evaluate(evaluator, code,
-              state_path: Keyword.get(opts, :state_path),
-              restore_path: Keyword.get(opts, :restore_path)
-            )
-          end,
-          on_timeout: fn -> kill_evaluator(evaluator) end
-        )
+        await_eval(timeout, fn ->
+          Evaluator.evaluate(evaluator, code,
+            state_path: Keyword.get(opts, :state_path),
+            restore_path: Keyword.get(opts, :restore_path)
+          )
+        end)
 
       {:error, reason} ->
         {:error, inspect(reason)}
@@ -107,22 +83,8 @@ defmodule Pi.Eval do
     await_eval(timeout, fn -> eval_with_captured_io(code, mode) end)
   end
 
-  defp kill_evaluator(pid) when is_pid(pid) do
-    ref = Process.monitor(pid)
-    Process.exit(pid, :kill)
-
-    receive do
-      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
-    after
-      100 -> :ok
-    end
-
-    Process.demonitor(ref, [:flush])
-  end
-
-  defp await_eval(timeout, fun, opts \\ []) when is_function(fun, 0) do
+  defp await_eval(timeout, fun) when is_function(fun, 0) do
     parent = self()
-    on_timeout = Keyword.get(opts, :on_timeout, fn -> :ok end)
     {pid, ref} = spawn_monitor(fn -> send(parent, {:result, fun.()}) end)
 
     receive do
@@ -136,7 +98,6 @@ defmodule Pi.Eval do
       timeout ->
         Process.demonitor(ref, [:flush])
         Process.exit(pid, :brutal_kill)
-        on_timeout.()
         {:error, "Evaluation timed out after #{timeout}ms"}
     end
   end
@@ -227,7 +188,13 @@ defmodule Pi.Eval do
 
     value_parts =
       Output.parts_for(result) ||
-        [OutputPart.inspect(inspected, language: :elixir, title: preview)]
+        [
+          OutputPart.inspect(inspected,
+            language: :elixir,
+            title: preview,
+            data: Pi.Syntax.metadata(inspected, language: :elixir)
+          )
+        ]
 
     parts =
       []

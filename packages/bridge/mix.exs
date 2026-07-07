@@ -4,10 +4,9 @@ defmodule PiBridge.MixProject do
   def project do
     [
       app: :pi_bridge,
-      version: "0.6.22",
+      version: "0.7.0",
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
-      consolidate_protocols: false,
       description: "BEAM runtime bridge for pi development agents",
       package: package(),
       source_url: "https://github.com/elixir-vibe/pi-elixir",
@@ -62,12 +61,15 @@ defmodule PiBridge.MixProject do
     [
       {:jason, "~> 1.4"},
       {:json_codec, "~> 0.1.5"},
+      {:lumis, "~> 0.6.1"},
       {:ex_ast, "~> 0.12"},
       {:req, "~> 0.5"},
       {:quackdb, "~> 0.5.4"},
       {:ecto_sql, "~> 3.13"},
       {:req_llm, "~> 1.6", optional: true},
       {:dune, "~> 0.3", optional: true},
+      {:bandit, "~> 1.8"},
+      {:plug, "~> 1.18"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},

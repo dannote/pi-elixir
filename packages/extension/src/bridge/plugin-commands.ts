@@ -26,13 +26,14 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function resolveCommandUrl(beamCwd: string, _commandName: string, attempt = 0) {
-  const conn = await resolveUrl(beamCwd)
+async function resolveCommandUrl(beamCwd: string, commandName: string, attempt = 0) {
+  const options = { ignoreExternal: commandName === 'quack' || commandName.startsWith('quack.') }
+  const conn = await resolveUrl(beamCwd, options)
 
-  if (conn || attempt >= 20) return conn
+  if (conn || !options.ignoreExternal || attempt >= 20) return conn
 
   await delay(250)
-  return resolveCommandUrl(beamCwd, _commandName, attempt + 1)
+  return resolveCommandUrl(beamCwd, commandName, attempt + 1)
 }
 
 export function registerBridgeCommand(

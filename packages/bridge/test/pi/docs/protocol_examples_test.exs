@@ -7,6 +7,7 @@ defmodule Pi.Docs.ProtocolExamplesTest do
   alias Pi.Protocol.LLM.Chunk
   alias Pi.Protocol.LLM.Done
   alias Pi.Protocol.LLM.Message
+  alias Pi.Protocol.MCP.Request, as: MCPRequest
   alias Pi.Protocol.PluginEvent
   alias Pi.Protocol.PluginHook
   alias Pi.Protocol.PluginHookResponse
@@ -108,7 +109,7 @@ defmodule Pi.Docs.ProtocolExamplesTest do
              })
   end
 
-  test "UI and plugin examples encode or decode through protocol structs" do
+  test "UI and MCP examples encode or decode through protocol structs" do
     assert %{"type" => "ui", "op" => "status", "key" => "ecto", "text" => "ecto 1/1"} =
              Stdio.__test_payload__(%UIEvent{
                type: :ui,
@@ -133,5 +134,13 @@ defmodule Pi.Docs.ProtocolExamplesTest do
 
     assert %{"block" => "blocked by plugin"} =
              Stdio.__test_payload__(PluginHookResponse.block("blocked by plugin"))
+
+    assert %MCPRequest{jsonrpc: "2.0", id: 1, method: "tools/call"} =
+             MCPRequest.from_map!(%{
+               "jsonrpc" => "2.0",
+               "id" => 1,
+               "method" => "tools/call",
+               "params" => %{"name" => "project_eval", "arguments" => %{"code" => "1 + 1"}}
+             })
   end
 end

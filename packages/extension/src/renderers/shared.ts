@@ -151,19 +151,17 @@ export function codeLines(
   return lines
 }
 
-interface CodeFrameOptions {
+export interface CodeFrameOptions {
   startLine?: number
   maxLines?: number
   highlightLine?: number
 }
 
-export function codeFrameLines(
-  text: string,
-  language: string,
+export function highlightedFrameLines(
+  highlighted: string[],
   theme: Theme,
   options: CodeFrameOptions = {}
 ): string[] {
-  const highlighted = highlightCode(text, language)
   const startLine = options.startLine ?? 1
   const shown =
     typeof options.maxLines === 'number' ? highlighted.slice(0, options.maxLines) : highlighted
@@ -179,6 +177,15 @@ export function codeFrameLines(
   const more = hiddenLine(hidden, theme)
   if (more) lines.push(more)
   return lines
+}
+
+export function codeFrameLines(
+  text: string,
+  language: string,
+  theme: Theme,
+  options: CodeFrameOptions = {}
+): string[] {
+  return highlightedFrameLines(highlightCode(text, language), theme, options)
 }
 
 export function stripFinalNewline(text: string) {

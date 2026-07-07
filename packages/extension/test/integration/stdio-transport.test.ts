@@ -7,8 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 const PROJECT_DIR =
   process.env.PI_ELIXIR_INTEGRATION_PROJECT ??
   path.resolve(__dirname, '../../../fixtures/demo_project')
-const BRIDGE_DIR = path.resolve(__dirname, '../../../bridge')
-const STDIO_LAUNCHER = path.resolve(__dirname, '../../scripts/stdio_launcher.exs')
+const START_STDIO_EXPR = 'Pi.Transport.Stdio.start()'
 const STARTUP_TIMEOUT = 120_000
 
 type StdioMessage = {
@@ -22,6 +21,10 @@ type StdioMessage = {
   payload?: {
     messages?: Array<{ content?: string }>
   }
+}
+
+function ensureDeps(): void {
+  execSync('mix deps.get', { cwd: PROJECT_DIR, stdio: 'pipe' })
 }
 
 function hasElixir(): boolean {
@@ -104,11 +107,12 @@ describe.skipIf(!elixirAvailable || !projectAvailable)('embedded stdio transport
   let nextCallId = 0
 
   beforeAll(async () => {
+    ensureDeps()
     queue = new JsonLineQueue()
-    proc = spawn('mix', ['do', 'deps.get', '+', 'run', '--no-halt', STDIO_LAUNCHER], {
-      cwd: BRIDGE_DIR,
+    proc = spawn('mix', ['run', '--no-halt', '-e', START_STDIO_EXPR], {
+      cwd: PROJECT_DIR,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, MIX_ENV: 'test', PI_ELIXIR_TARGET_CWD: PROJECT_DIR }
+      env: { ...process.env, MIX_ENV: 'test' }
     })
 
     proc.stdout?.on('data', (chunk: Buffer) => queue.push(chunk))

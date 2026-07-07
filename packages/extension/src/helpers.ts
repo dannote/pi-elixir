@@ -21,9 +21,10 @@ import {
   callTool,
   resolveUrl,
   getConnectionKind,
-  getStartupTranscript
+  getStartupTranscript,
+  type InstallPrompt
 } from './connection/resolver.ts'
-import { getUnavailableReason } from './connection/status.ts'
+import { getIncompatibleDependency, getUnavailableReason } from './connection/status.ts'
 import { resolveMixProjectCwd } from './mix/project.ts'
 import type { ToolArgs, ToolResult } from './protocol/types.ts'
 import { sleep } from './shared/async.ts'
@@ -161,13 +162,46 @@ export interface BridgeToolOpts {
   ) => Component
 }
 
+function missingDependencyError() {
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: 'Pi BEAM tools are not installed in this Mix project. Run `/elixir:install` to add the dev-only dependency, or retry from a non-interactive session where pi-elixir can install it automatically.'
+      }
+    ],
+    isError: true,
+    details: {}
+  }
+}
+
+function incompatibleDependencyError(cwd: string) {
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text:
+          getIncompatibleDependency(cwd) ??
+          'Installed pi_bridge version is incompatible with this pi-elixir extension.'
+      }
+    ],
+    isError: true,
+    details: {}
+  }
+}
+
 function noMixProjectError() {
   return {
     content: [
       {
         type: 'text' as const,
         text: dedent`
-          pi-elixir could not find a Mix project.
+          pi-elixir could not find a Mix project or bundled bridge.
+
+          How pi-elixir chooses where to run:
+          1. current directory if it has mix.exs
+          2. a Mix project containing the tool path argument
+          3. the bundled pi_bridge fallback from the installed extension
 
           Try running from a Mix project root, pass a path inside a Mix project, or run /elixir:doctor for environment details.
         `
@@ -201,11 +235,13 @@ function noConnectionError() {
         text: dedent`
           pi-elixir could not connect to pi_bridge for this project.
 
-          Normally pi-elixir starts an extension-owned embedded BEAM sidecar automatically. If this is a cold project, it may still be compiling bridge or project dependencies.
+          Normally pi-elixir starts an embedded BEAM automatically. If this is a cold project, it may still be compiling dependencies.
 
           Next steps:
           - wait a moment and retry the tool call
           - run /elixir:doctor to see bridge/runtime diagnostics
+          - if dependencies were just changed, run mix deps.get && mix compile
+          - use mix phx.server only when intentionally exposing an external Phoenix/MCP bridge
         `
       }
     ],
@@ -253,8 +289,27 @@ function stillCompilingError() {
 function connectionError(cwd: string) {
   const kind = getConnectionKind(cwd)
   if (kind === 'starting') return stillCompilingError()
+  if (kind === 'missing') return missingDependencyError()
   if (kind === 'unavailable') return runtimeUnavailableError(cwd)
+  if (kind === 'incompatible') return incompatibleDependencyError(cwd)
   return noConnectionError()
+}
+
+function installPromptMessage(prompt: InstallPrompt) {
+  return dedent`
+    Pi BEAM tools are not installed in this Mix project.
+
+    I can add the dev-only Pi BEAM dependency to ${prompt.mixExsPath} and run mix deps.get.
+
+    Proposed dependency:
+      ${prompt.dependency}
+
+    Proceed?
+  `
+}
+
+function allowNonInteractiveInstall(): boolean {
+  return process.env.PI_ELIXIR_AUTO_INSTALL !== '0'
 }
 
 type ExecuteToolCall = (
@@ -273,7 +328,7 @@ interface BeamToolRegistration {
   opts?: BridgeToolOpts
 }
 
-type BeamToolCwdSource = 'workspace' | 'path-argument'
+type BeamToolCwdSource = 'external-env' | 'workspace' | 'path-argument' | 'bundled-bridge'
 
 interface BeamToolTarget {
   cwd: string
@@ -281,16 +336,21 @@ interface BeamToolTarget {
 }
 
 function resolveBeamToolTarget(
-  _pi: ExtensionAPI,
-  _toolName: string,
+  pi: ExtensionAPI,
+  toolName: string,
   params: ToolArgs,
   ctx: ExtensionContext
 ): BeamToolTarget | null {
+  if (process.env.PI_MCP_URL) return { cwd: ctx.cwd, source: 'external-env' }
+
   const workspace = resolveMixProjectCwd(ctx.cwd)
   if (workspace) return { cwd: workspace, source: 'workspace' }
 
   const pathArgument = resolveMixProjectCwdFromToolPath(params, ctx.cwd)
   if (pathArgument) return { cwd: pathArgument, source: 'path-argument' }
+
+  const bundled = resolveBundledBridgeCwd(pi, toolName)
+  if (bundled) return { cwd: bundled, source: 'bundled-bridge' }
 
   return null
 }
@@ -322,6 +382,37 @@ function resolveMixProjectCwdFromToolPath(params: ToolArgs, cwd: string): string
   }
 }
 
+function resolveBundledBridgeCwd(pi: ExtensionAPI, toolName: string): string | null {
+  const sourceInfo = pi.getAllTools().find((tool) => tool.name === toolName)?.sourceInfo
+  const candidates = bundledBridgeCandidates(sourceInfo?.baseDir, sourceInfo?.path)
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, 'mix.exs'))) return candidate
+  }
+  return null
+}
+
+function bundledBridgeCandidates(...sources: Array<string | undefined>): string[] {
+  const candidates = new Set<string>()
+
+  for (const source of sources) {
+    if (!source || source.startsWith('<')) continue
+    const start =
+      fs.existsSync(source) && fs.statSync(source).isDirectory() ? source : path.dirname(source)
+    let dir = start
+    while (true) {
+      candidates.add(path.join(dir, 'packages', 'bridge'))
+      candidates.add(path.join(dir, '..', 'bridge'))
+
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+
+  return [...candidates]
+}
+
 function displayPathForUser(value: string): string {
   const home = process.env.HOME
   if (home && value === home) return '~'
@@ -331,10 +422,14 @@ function displayPathForUser(value: string): string {
 
 function beamSourceLabel(source: BeamToolCwdSource): string {
   switch (source) {
+    case 'external-env':
+      return 'external PI_MCP_URL bridge'
     case 'workspace':
       return 'current Mix project'
     case 'path-argument':
       return 'Mix project from tool path'
+    case 'bundled-bridge':
+      return 'bundled pi_bridge fallback'
   }
 
   source satisfies never
@@ -352,16 +447,18 @@ function bridgePreparationMessage(target: BeamToolTarget): string {
 
 async function resolveUrlWithStartupGrace(
   beamCwd: string,
+  confirmInstall: (prompt: InstallPrompt) => Promise<boolean>,
   onProgress?: (message: string) => void,
   signal?: AbortSignal
 ) {
+  const options = { confirmInstall, onProgress, signal }
   const startedAt = Date.now()
   const waitBudget = startupWaitBudgetMs()
   const retryDelay = startupRetryDelayMs()
 
   while (true) {
     // eslint-disable-next-line no-await-in-loop -- startup grace retries must observe sequential connection state.
-    const conn = await resolveUrl(beamCwd)
+    const conn = await resolveUrl(beamCwd, options)
     if (conn || getConnectionKind(beamCwd) !== 'starting') return conn
 
     const transcript = getStartupTranscript(beamCwd)
@@ -384,7 +481,7 @@ function registerBeamTool(pi: ExtensionAPI, tool: BeamToolRegistration) {
       if (!target) return noMixProjectError()
 
       const beamCwd = target.cwd
-      let startupTranscript = ''
+      let installTranscript = ''
       let preparationNoticeShown = false
       const preparationTimer = onUpdate
         ? setTimeout(() => {
@@ -400,9 +497,13 @@ function registerBeamTool(pi: ExtensionAPI, tool: BeamToolRegistration) {
       try {
         const conn = await resolveUrlWithStartupGrace(
           beamCwd,
+          (prompt) =>
+            ctx.hasUI
+              ? ctx.ui.confirm('Install Pi BEAM tools?', installPromptMessage(prompt))
+              : Promise.resolve(allowNonInteractiveInstall()),
           (message) => {
             if (message) {
-              startupTranscript = message
+              installTranscript = message
               if (preparationTimer && !preparationNoticeShown) clearTimeout(preparationTimer)
               onUpdate?.({
                 content: [{ type: 'text' as const, text: message }],
@@ -414,38 +515,20 @@ function registerBeamTool(pi: ExtensionAPI, tool: BeamToolRegistration) {
         )
         if (!conn) {
           const error = connectionError(beamCwd)
-          if (!startupTranscript) return error
+          if (!installTranscript) return error
 
           return {
             ...error,
             content: [
               {
                 type: 'text' as const,
-                text: `${startupTranscript}\n\n${error.content.map((part) => part.text).join('\n')}`
+                text: `${installTranscript}\n\n${error.content.map((part) => part.text).join('\n')}`
               }
             ]
           }
         }
 
         const bridgeParams = tool.opts?.prepareParams?.(params, ctx, beamCwd, _id) ?? params
-        if (preparationNoticeShown || startupTranscript) {
-          onUpdate?.({
-            content: [
-              {
-                type: 'text' as const,
-                text: `Running ${tool.label} in ${displayPathForUser(beamCwd)}...`
-              }
-            ],
-            details: {
-              bridge: {
-                cwd: beamCwd,
-                source: target.source,
-                phase: 'running',
-                connection: conn.kind
-              }
-            }
-          })
-        }
         const { text: rawText, isError } = await tool.executeToolCall(
           bridgeParams,
           conn.url,
@@ -459,7 +542,7 @@ function registerBeamTool(pi: ExtensionAPI, tool: BeamToolRegistration) {
           isError: isError || forcedError,
           details: {
             args: params,
-            toolName: tool.name,
+            mcpName: tool.name,
             bridge: { cwd: beamCwd, source: target.source, connection: conn.kind },
             ...extraDetails
           }
@@ -476,7 +559,7 @@ function registerBeamTool(pi: ExtensionAPI, tool: BeamToolRegistration) {
 export function bridgeTool(
   pi: ExtensionAPI,
   name: string,
-  bridgeName: string,
+  mcpName: string,
   label: string,
   description: string,
   parameters: ToolParameters,
@@ -489,7 +572,7 @@ export function bridgeTool(
     description,
     parameters,
     renderCall,
-    executeToolCall: (params, url, signal) => callTool(url, bridgeName, params, signal),
+    executeToolCall: (params, url, signal) => callTool(url, mcpName, params, signal),
     opts
   })
 }

@@ -7,9 +7,10 @@ Use this guidance whenever the user asks to release, publish, ship, or update a 
 - Do **not** add arbitrary links to GitHub release notes. In particular, do not add HexDocs links, Hex package links, marketing links, or generated URLs unless the user explicitly asks for them.
 - Do **not** create or edit GitHub releases unless the user explicitly asks for a GitHub release. Publishing to Hex and creating a GitHub release are separate actions.
 - Do **not** embellish release notes. Use the changelog wording or a terse bullet list of actual changes.
-- Publish Hex package and docs in one command unless the user explicitly says not to publish docs:
+- Always publish docs when publishing a Hex package unless the user explicitly says not to:
   ```bash
-  mix hex.publish --yes
+  mix hex.publish package --yes
+  mix hex.publish docs --yes
   ```
 - If Hex asks for 2FA, stop and ask for the current code. Do not retry blindly. When a code is provided, pipe it to the command.
 - Never leave a downstream project on a local path dependency after dogfooding. Revert to a released Hex dependency before finalizing.
@@ -53,13 +54,14 @@ When another local project depends on the package being released:
 
 ## Publishing sequence
 
-Run one command:
+Run package publish first, then docs:
 
 ```bash
-mix hex.publish --yes
+mix hex.publish package --yes
+mix hex.publish docs --yes
 ```
 
-If Hex asks for 2FA, stop and ask for the current code. Do not retry blindly. When a code is provided, pipe it to the command.
+If both require 2FA and the same code is still valid, it can be piped to both commands. If either command fails due to 2FA expiry, ask for a new code.
 
 ## GitHub releases
 

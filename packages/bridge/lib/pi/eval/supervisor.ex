@@ -34,16 +34,12 @@ defmodule Pi.Eval.Supervisor do
 
     case Registry.lookup(Pi.Eval.Registry, session_id) do
       [{pid, _value}] when is_pid(pid) ->
-        if Process.alive?(pid), do: {:ok, pid}, else: start_evaluator(session_id, opts)
+        {:ok, pid}
 
       [] ->
-        start_evaluator(session_id, opts)
+        child_spec = {Pi.Eval.Evaluator, Keyword.put(opts, :session_id, session_id)}
+        DynamicSupervisor.start_child(__MODULE__, child_spec)
     end
-  end
-
-  defp start_evaluator(session_id, opts) do
-    child_spec = {Pi.Eval.Evaluator, Keyword.put(opts, :session_id, session_id)}
-    DynamicSupervisor.start_child(__MODULE__, child_spec)
   end
 
   @impl true

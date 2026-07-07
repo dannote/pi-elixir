@@ -29,7 +29,7 @@ defmodule Pi.Bridge.Info do
 
   def snapshot(transport \\ :stdio) do
     %BridgeInfo{
-      project: Mix.Project.config()[:app],
+      project: project_app(),
       version: bridge_version(),
       transport: transport,
       skills: skills(),
@@ -98,6 +98,56 @@ defmodule Pi.Bridge.Info do
     |> Application.spec(:vsn)
     |> to_string()
   end
+
+  defp project_app do
+    cwd = System.get_env("PI_ELIXIR_PROJECT_CWD")
+
+    mix_exs = if is_binary(cwd), do: Path.join(cwd, "mix.exs")
+
+    with path when is_binary(path) <- mix_exs,
+         true <- File.exists?(path),
+         {:ok, source} <- File.read(path),
+         app when is_atom(app) <- app_from_mix_exs_ast(source) do
+      app
+    else
+      _ -> Mix.Project.config()[:app]
+    end
+  end
+
+  defp app_from_mix_exs_ast(source) do
+    with {:ok, ast} <- Code.string_to_quoted(source) do
+      {_ast, app} =
+        Macro.prewalk(ast, nil, fn
+          {:def, _meta, [{:project, _, args}, [do: body]]} = node, nil
+          when args in [[], nil] ->
+            {node, app_from_project_body(body)}
+
+          node, app ->
+            {node, app}
+        end)
+
+      app
+    end
+  end
+
+  defp app_from_project_body(body) do
+    body
+    |> List.wrap()
+    |> Enum.find_value(&app_from_keyword_ast/1)
+  end
+
+  defp app_from_keyword_ast({key, value}) when key in [:app, :otp_app] and is_atom(value),
+    do: value
+
+  defp app_from_keyword_ast(list) when is_list(list) do
+    Enum.find_value(list, &app_from_keyword_ast/1)
+  end
+
+  defp app_from_keyword_ast({:__block__, _meta, expressions}) do
+    Enum.find_value(expressions, &app_from_keyword_ast/1)
+  end
+
+  defp app_from_keyword_ast(_other), do: nil
 
   defp runtime_functions(module) do
     module.__info__(:functions)

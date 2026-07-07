@@ -11,18 +11,30 @@ import {
   sendEmbeddedEvent,
   startEmbeddedInBackground
 } from '#src/embedded/stdio-process.ts'
+import {
+  ensurePiBeamDependency,
+  type InstallOptions,
+  type InstallPrompt
+} from '#src/mix/installer.ts'
 import { elixirRuntimeProblem } from '#src/mix/runtime.ts'
 import type { BridgeEvent, ToolArgs, ToolResult } from '#src/protocol/types.ts'
+import { callHttpTool, discoverExternalMCP } from '#src/transport/http-json-rpc.ts'
 
 import {
   clearUnavailable,
   connectionCache,
+  getIncompatibleDependency,
   getUnavailableReason,
+  hasMissingDependency,
   markUnavailable,
   type ConnectionKind
 } from './status.ts'
 
-export type { ConnectionKind }
+export type { ConnectionKind, InstallPrompt }
+
+export interface ResolveUrlOptions extends InstallOptions {
+  ignoreExternal?: boolean
+}
 
 export interface ConnectionResolution {
   url: string
@@ -37,11 +49,18 @@ export async function callTool(
   args: ToolArgs,
   signal?: AbortSignal
 ): Promise<ToolResult> {
+  const kind = url.startsWith('stdio:') ? 'embedded' : 'http'
   return withDiagnosticSpan(
     'bridge_tool_call',
-    cwdFromEmbeddedUrl(url),
-    { name, kind: 'embedded' },
-    async () => callEmbeddedTool(cwdFromEmbeddedUrl(url), name, args, signal)
+    kind === 'embedded' ? cwdFromEmbeddedUrl(url) : undefined,
+    { name, kind },
+    async () => {
+      if (url.startsWith('stdio:')) {
+        return callEmbeddedTool(cwdFromEmbeddedUrl(url), name, args, signal)
+      }
+
+      return callHttpTool(url, name, args, signal)
+    }
   )
 }
 
@@ -49,16 +68,44 @@ export function sendBridgeEvent(cwd: string, event: BridgeEvent): Promise<void> 
   return sendEmbeddedEvent(cwd, event)
 }
 
-export async function resolveUrl(cwd: string): Promise<ConnectionResolution | null> {
+export async function resolveUrl(
+  cwd: string,
+  options?: ResolveUrlOptions
+): Promise<ConnectionResolution | null> {
   return withDiagnosticSpan('resolve_url', cwd, undefined, async () => {
-    const cached = connectionCache.get(cwd)
+    if (!options?.ignoreExternal && process.env.PI_MCP_URL) {
+      recordDiagnostic('resolve_url_phase', cwd, { phase: 'env_url' })
+      return { url: process.env.PI_MCP_URL, kind: 'external' }
+    }
+
+    const cached = options?.ignoreExternal ? null : connectionCache.get(cwd)
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       recordDiagnostic('resolve_url_phase', cwd, { phase: 'cache_hit', kind: cached.kind })
       return { url: cached.url, kind: cached.kind }
     }
 
+    if (!options?.ignoreExternal) {
+      const externalUrl = await withDiagnosticSpan(
+        'discover_external_mcp',
+        cwd,
+        undefined,
+        async () => discoverExternalMCP(cwd)
+      )
+      if (externalUrl) {
+        connectionCache.set(cwd, { url: externalUrl, kind: 'external', timestamp: Date.now() })
+        recordDiagnostic('resolve_url_phase', cwd, { phase: 'external_found' })
+        return { url: externalUrl, kind: 'external' }
+      }
+    }
+
     if (process.env.PI_DISABLE_EMBEDDED === '1') {
       recordDiagnostic('resolve_url_phase', cwd, { phase: 'embedded_disabled' })
+      return null
+    }
+
+    const incompatible = getIncompatibleDependency(cwd)
+    if (incompatible) {
+      recordDiagnostic('resolve_url_phase', cwd, { phase: 'incompatible_dependency' })
       return null
     }
 
@@ -73,16 +120,29 @@ export async function resolveUrl(cwd: string): Promise<ConnectionResolution | nu
     }
     clearUnavailable(cwd)
 
-    if (hasEmbeddedFailed(cwd)) {
-      recordDiagnostic('resolve_url_phase', cwd, { phase: 'embedded_failed' })
+    const failedBeforeInstall = hasEmbeddedFailed(cwd)
+    const missingBeforeInstall = hasMissingDependency(cwd)
+    const dependencyReady =
+      process.env.PI_ELIXIR_PROJECT_DEP === '1'
+        ? await withDiagnosticSpan('ensure_pi_beam_dependency', cwd, undefined, async () =>
+            ensurePiBeamDependency(cwd, options)
+          )
+        : true
+    if (!dependencyReady) {
+      recordDiagnostic('resolve_url_phase', cwd, { phase: 'dependency_unavailable' })
       return null
     }
-
+    if (failedBeforeInstall && !missingBeforeInstall) {
+      recordDiagnostic('resolve_url_phase', cwd, { phase: 'embedded_failed_before_install' })
+      return null
+    }
     clearEmbeddedFailed(cwd)
 
     if (isEmbeddedReady(cwd)) {
       const url = getEmbeddedUrl(cwd)
-      connectionCache.set(cwd, { url, kind: 'embedded', timestamp: Date.now() })
+      if (!options?.ignoreExternal) {
+        connectionCache.set(cwd, { url, kind: 'embedded', timestamp: Date.now() })
+      }
       recordDiagnostic('resolve_url_phase', cwd, { phase: 'embedded_ready' })
       return { url, kind: 'embedded' }
     }
@@ -100,6 +160,8 @@ export function getStartupTranscript(cwd: string): string | null {
 export function getConnectionKind(cwd: string): ConnectionKind {
   const cached = connectionCache.get(cwd)
   if (cached) return cached.kind
+  if (getIncompatibleDependency(cwd)) return 'incompatible'
   if (getUnavailableReason(cwd)) return 'unavailable'
+  if (hasMissingDependency(cwd)) return 'missing'
   return getEmbeddedKind(cwd)
 }

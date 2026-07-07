@@ -1,5 +1,5 @@
-defmodule Pi.Tool.Dispatch do
-  @moduledoc "Bridge-native tool dispatch for stdio transports."
+defmodule Pi.MCP.Tools do
+  @moduledoc "MCP tool dispatch for the embedded server."
 
   require Pi.Features
 
@@ -104,16 +104,36 @@ defmodule Pi.Tool.Dispatch do
     code |> Pi.Eval.sandbox(timeout: timeout) |> sandbox_result()
   end
 
-  defp run_eval(%EvalRequest{code: code} = request, timeout, true) do
+  defp run_eval(%EvalRequest{target: target, code: code} = request, timeout, true)
+       when target in [:project, "project"] do
+    if Pi.ProjectEval.available?() do
+      code |> Pi.ProjectEval.run_structured(eval_opts(request, timeout)) |> encode_result()
+    else
+      code |> Pi.Eval.run_structured(eval_opts(request, timeout)) |> encode_result()
+    end
+  end
+
+  defp run_eval(%EvalRequest{target: target, code: code} = request, timeout, false)
+       when target in [:project, "project"] do
+    if Pi.ProjectEval.available?() do
+      Pi.ProjectEval.run(code, eval_opts(request, timeout))
+    else
+      Pi.Eval.run(code, eval_opts(request, timeout))
+    end
+  end
+
+  defp run_eval(%EvalRequest{target: target, code: code} = request, timeout, true)
+       when target in [:bridge, "bridge"] do
     code |> Pi.Eval.run_structured(eval_opts(request, timeout)) |> encode_result()
   end
 
-  defp run_eval(%EvalRequest{code: code} = request, timeout, false) do
+  defp run_eval(%EvalRequest{target: target, code: code} = request, timeout, false)
+       when target in [:bridge, "bridge"] do
     Pi.Eval.run(code, eval_opts(request, timeout))
   end
 
   defp eval_opts(request, timeout) do
-    [timeout: timeout, reload: request.reload]
+    [timeout: timeout]
     |> maybe_put(:session_id, request.session_id)
     |> maybe_put(:state_path, request.state_path)
     |> maybe_put(:restore_path, request.restore_path)

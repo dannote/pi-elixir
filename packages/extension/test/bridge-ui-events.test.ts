@@ -14,14 +14,19 @@ function fakeCtx() {
 }
 
 describe('Elixir connection status UI', () => {
-  it.each<ConnectionKind>(['embedded', 'starting', 'unavailable', null])(
-    'keeps footer status quiet for %s state',
-    (kind) => {
-      const ctx = fakeCtx()
+  it.each<ConnectionKind>([
+    'external',
+    'embedded',
+    'starting',
+    'missing',
+    'incompatible',
+    'unavailable',
+    null
+  ])('keeps footer status quiet for %s state', (kind) => {
+    const ctx = fakeCtx()
 
-      updateStatus(ctx, kind)
+    updateStatus(ctx, kind)
 
-      expect(ctx.ui.setStatus).toHaveBeenCalledWith('elixir', undefined)
-    }
-  )
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith('elixir', undefined)
+  })
 })

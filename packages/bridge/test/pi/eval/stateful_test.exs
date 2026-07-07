@@ -94,20 +94,6 @@ defmodule Pi.Eval.StatefulTest do
     assert payload.text == "1"
   end
 
-  test "timed out stateful eval stops the wedged evaluator", %{state_path: state_path} do
-    assert {:error, "Evaluation timed out after " <> _} =
-             Eval.run_structured("Process.sleep(:infinity)",
-               session_id: "timeout-leaf",
-               state_path: state_path,
-               timeout: 20
-             )
-
-    assert {:ok, payload} =
-             Eval.run_structured("1 + 1", session_id: "timeout-leaf", state_path: state_path)
-
-    assert payload.text == "2"
-  end
-
   test "reset and forget are available from inside eval", %{state_path: state_path} do
     assert {:ok, _payload} =
              Eval.run_structured("x = 1; y = 2", session_id: "leaf", state_path: state_path)

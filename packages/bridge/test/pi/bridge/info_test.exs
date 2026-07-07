@@ -22,6 +22,38 @@ defmodule Pi.Bridge.InfoTest do
              Jason.decode!(encoded)
   end
 
+  test "snapshot reads isolated target project app name from mix.exs AST" do
+    previous = System.get_env("PI_ELIXIR_PROJECT_CWD")
+    dir = Path.join(System.tmp_dir!(), "pi-elixir-info-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+
+    File.write!(Path.join(dir, "mix.exs"), """
+    defmodule Demo.MixProject do
+      use Mix.Project
+
+      def project do
+        [
+          app: :isolated_demo,
+          version: "0.1.0",
+          deps: []
+        ]
+      end
+    end
+    """)
+
+    System.put_env("PI_ELIXIR_PROJECT_CWD", dir)
+
+    try do
+      assert %BridgeInfo{project: :isolated_demo} = Info.snapshot(:stdio)
+    after
+      if previous,
+        do: System.put_env("PI_ELIXIR_PROJECT_CWD", previous),
+        else: System.delete_env("PI_ELIXIR_PROJECT_CWD")
+
+      File.rm_rf!(dir)
+    end
+  end
+
   test "runtime inventory and eval prelude expose host helpers separately from sessions" do
     runtime_modules = Enum.map(Info.runtime_apis(), & &1.module)
 

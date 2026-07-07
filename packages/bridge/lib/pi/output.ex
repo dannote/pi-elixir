@@ -55,7 +55,11 @@ defmodule Pi.Output do
         OutputPart.code(source,
           language: language,
           title: Keyword.get(opts, :title) || Keyword.get(opts, :preview) || first_line(source),
-          data: Keyword.get(opts, :data) || Keyword.get(opts, :metadata, %{})
+          data:
+            Map.merge(
+              Pi.Syntax.metadata(source, language: language),
+              Keyword.get(opts, :data) || Keyword.get(opts, :metadata, %{})
+            )
         )
       ],
       text: source

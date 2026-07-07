@@ -9,6 +9,8 @@ import {
   compactText,
   decodeInspectedString,
   expandHint,
+  hiddenLine,
+  highlightedFrameLines,
   inlineExpandHint,
   renderCompactLine,
   renderLines,
@@ -21,6 +23,17 @@ export interface OutputPart {
   language?: string | null
   title?: string | null
   data?: Record<string, unknown> | null
+}
+
+interface HighlightSpan {
+  text?: string
+  scopes?: unknown[]
+}
+
+interface HighlightPayload {
+  engine?: string
+  language?: string
+  lines?: HighlightSpan[][]
 }
 
 function partPreview(part: OutputPart) {
@@ -254,6 +267,93 @@ function booleanMetadata(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined
 }
 
+function highlightPayload(part: OutputPart): HighlightPayload | null {
+  const highlight = part.data?.highlight
+  if (typeof highlight !== 'object' || highlight === null) return null
+  const payload = highlight as HighlightPayload
+  return Array.isArray(payload.lines) ? payload : null
+}
+
+const rainbowThemeKeys = ['syntaxType', 'syntaxNumber', 'syntaxFunction', 'syntaxOperator'] as const
+
+function rainbowIndex(scopes: string[]): number | undefined {
+  for (const scope of scopes) {
+    const match = scope.match(/rainbow[-.](\d+)/u)
+    if (match) return Number.parseInt(match[1] ?? '1', 10) - 1
+  }
+  return undefined
+}
+
+function syntaxColor(theme: Theme, color: Parameters<Theme['fg']>[0], text: string): string {
+  return theme.fg(color, text)
+}
+
+function syntaxBold(theme: Theme, color: Parameters<Theme['fg']>[0], text: string): string {
+  return theme.fg(color, theme.bold(text))
+}
+
+function styleScope(scopes: string[], theme: Theme, text: string): string {
+  const rainbow = rainbowIndex(scopes)
+  if (rainbow !== undefined && Number.isFinite(rainbow)) {
+    return syntaxColor(theme, rainbowThemeKeys[Math.abs(rainbow) % rainbowThemeKeys.length], text)
+  }
+
+  const joined = scopes.join(' ')
+  if (joined.includes('comment')) return syntaxColor(theme, 'syntaxComment', text)
+  if (joined.includes('string-special-symbol')) return syntaxColor(theme, 'syntaxNumber', text)
+  if (joined.includes('module') || joined.includes('constructor'))
+    return syntaxBold(theme, 'syntaxType', text)
+  if (joined.includes('function')) return syntaxColor(theme, 'syntaxFunction', text)
+  if (joined.includes('keyword')) return syntaxBold(theme, 'syntaxKeyword', text)
+  if (joined.includes('operator') || joined.includes('punctuation-special'))
+    return syntaxColor(theme, 'syntaxOperator', text)
+  if (joined.includes('string')) return syntaxColor(theme, 'syntaxString', text)
+  if (joined.includes('number') || joined.includes('boolean') || joined.includes('constant'))
+    return syntaxColor(theme, 'syntaxNumber', text)
+  if (joined.includes('variable')) return syntaxColor(theme, 'syntaxVariable', text)
+  if (joined.includes('punctuation')) return syntaxColor(theme, 'syntaxPunctuation', text)
+  return theme.fg('toolOutput', text)
+}
+
+function highlightedBodyLines(part: OutputPart, theme: Theme): string[] | null {
+  const highlight = highlightPayload(part)
+  if (!highlight) return null
+
+  return (
+    highlight.lines?.map((line) =>
+      line
+        .map((span) => {
+          const text = typeof span.text === 'string' ? span.text : ''
+          const scopes = Array.isArray(span.scopes)
+            ? span.scopes.filter((scope): scope is string => typeof scope === 'string')
+            : []
+          return styleScope(scopes, theme, text)
+        })
+        .join('')
+    ) ?? null
+  )
+}
+
+function highlightedCodeLines(part: OutputPart, theme: Theme, maxLines?: number): string[] | null {
+  const lines = highlightedBodyLines(part, theme)
+  if (!lines) return null
+  const shown = typeof maxLines === 'number' ? lines.slice(0, maxLines) : lines
+  const hidden = typeof maxLines === 'number' ? lines.length - shown.length : 0
+  const rendered = shown.map((line) => `  ${line}`)
+  const more = hiddenLine(hidden, theme)
+  if (more) rendered.push(more)
+  return rendered
+}
+
+function highlightedCodeFrameLines(
+  part: OutputPart,
+  theme: Theme,
+  options: { startLine?: number; maxLines?: number; highlightLine?: number } = {}
+): string[] | null {
+  const lines = highlightedBodyLines(part, theme)
+  return lines ? highlightedFrameLines(lines, theme, options) : null
+}
+
 function formatBytes(value: number | undefined) {
   if (value === undefined) return undefined
   if (value < 1024) return `${value} B`
@@ -327,10 +427,15 @@ function renderCompactSourcePart(part: OutputPart, theme: Theme): Component {
       const maxLines = 6
       const totalLines = output ? output.split('\n').length : 0
       const hidden = totalLines > maxLines
-      const lines = codeFrameLines(output, part.language ?? 'elixir', theme, {
-        startLine: sourceStartLine(part),
-        maxLines
-      })
+      const lines =
+        highlightedCodeFrameLines(part, theme, {
+          startLine: sourceStartLine(part),
+          maxLines
+        }) ??
+        codeFrameLines(output, part.language ?? 'elixir', theme, {
+          startLine: sourceStartLine(part),
+          maxLines
+        })
       return ['', theme.fg('muted', sourceTitle(part, hidden, theme, width)), ...lines]
     },
     invalidate: () => undefined
@@ -500,20 +605,62 @@ function renderWebFetchPart(part: OutputPart, expanded: boolean, theme: Theme): 
   return expanded ? renderExpandedWebFetchPart(part, theme) : renderCompactWebFetchPart(part, theme)
 }
 
+function compactHighlightedPreview(part: OutputPart, theme: Theme): string | null {
+  const line = highlightedBodyLines(part, theme)?.[0]
+  return line ?? null
+}
+
+function compactPartPreview(part: OutputPart, index: number, theme: Theme) {
+  const text = compactHighlightedPreview(part, theme) ?? partPreview(part)
+  const styled = part.kind === 'text' && index === 0 ? theme.fg('toolOutput', text) : text
+  return index === 0 ? styled : theme.fg('muted', ` ↳ ${text}`)
+}
+
 function renderCompactOutputParts(visibleParts: OutputPart[], theme: Theme): Component {
   if (visibleParts.length > 1 && visibleParts[0]?.kind === 'text') {
     return renderCompactLine('', theme.fg('toolOutput', partPreview(visibleParts[0])), true, theme)
   }
 
-  const preview = visibleParts
-    .map((part, index) => {
-      const text = partPreview(part)
-      const styled = part.kind === 'text' && index === 0 ? theme.fg('toolOutput', text) : text
-      return index === 0 ? styled : theme.fg('muted', ` ↳ ${text}`)
-    })
-    .join('')
+  const preview = visibleParts.map((part, index) => compactPartPreview(part, index, theme)).join('')
   const semanticHidden = visibleParts.some(partHasSemanticHiddenOutput)
   return renderCompactLine('', preview, semanticHidden, theme)
+}
+
+function firstPartLines(lines: string[], index: number): string[] {
+  if (index !== 0) return lines
+  const [first, ...rest] = lines
+  return [first?.trimStart() ?? '', ...rest]
+}
+
+function renderExpandedPart(part: OutputPart, index: number, theme: Theme): string[] {
+  const output = stripFinalNewline(part.body ?? '')
+  const kind = part.kind ?? 'text'
+
+  switch (kind) {
+    case 'table':
+      return [theme.fg('toolOutput', output)]
+    case 'tree':
+      return renderTreePart(part, theme) ?? [theme.fg('toolOutput', output)]
+    case 'inspect':
+      return firstPartLines(
+        highlightedCodeLines(part, theme) ?? codeLines(output, part.language ?? 'elixir', theme),
+        index
+      )
+    case 'code':
+      return (
+        highlightedCodeFrameLines(part, theme, { startLine: sourceStartLine(part) }) ??
+        codeFrameLines(output, part.language ?? 'elixir', theme, {
+          startLine: sourceStartLine(part)
+        })
+      )
+    case 'error':
+      return [theme.fg('error', output)]
+    default:
+      return firstPartLines(
+        output.split('\n').map((line) => `  ${theme.fg('toolOutput', line)}`),
+        index
+      )
+  }
 }
 
 export function renderOutputParts(parts: OutputPart[], expanded: boolean, theme: Theme) {
@@ -534,40 +681,9 @@ export function renderOutputParts(parts: OutputPart[], expanded: boolean, theme:
 
   if (!expanded) return renderCompactOutputParts(visibleParts, theme)
 
-  const lines: string[] = []
-  for (const [index, part] of visibleParts.entries()) {
-    if (index > 0) lines.push('')
-    const output = stripFinalNewline(part.body ?? '')
-    const kind = part.kind ?? 'text'
-    if (kind === 'table') {
-      lines.push(theme.fg('toolOutput', output))
-    } else if (kind === 'tree') {
-      lines.push(...(renderTreePart(part, theme) ?? [theme.fg('toolOutput', output)]))
-    } else if (kind === 'inspect') {
-      const code = codeLines(output, part.language ?? 'elixir', theme)
-      if (index === 0) {
-        const [first, ...rest] = code
-        lines.push(first?.trimStart() ?? '', ...rest)
-      } else {
-        lines.push(...code)
-      }
-    } else if (kind === 'code') {
-      lines.push(
-        ...codeFrameLines(output, part.language ?? 'elixir', theme, {
-          startLine: sourceStartLine(part)
-        })
-      )
-    } else if (kind === 'error') {
-      lines.push(theme.fg('error', output))
-    } else {
-      const rendered = output.split('\n').map((line) => `  ${theme.fg('toolOutput', line)}`)
-      if (index === 0) {
-        const [first, ...rest] = rendered
-        lines.push(first?.trimStart() ?? '', ...rest)
-      } else {
-        lines.push(...rendered)
-      }
-    }
-  }
+  const lines = visibleParts.flatMap((part, index) => [
+    ...(index > 0 ? [''] : []),
+    ...renderExpandedPart(part, index, theme)
+  ])
   return renderLines(lines)
 }

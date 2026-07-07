@@ -4,10 +4,12 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
+  clearIncompatibleDependency,
   clearUnavailable,
   connectionCache,
   emitStatusChange,
   invalidateCache,
+  markIncompatibleDependency,
   markUnavailable
 } from '#src/connection/status.ts'
 import { recordDiagnostic, withDiagnosticSpan } from '#src/diagnostics.ts'
@@ -22,8 +24,10 @@ import type {
   ToolArgs,
   ToolResult
 } from '#src/protocol/types.ts'
-const BRIDGE_CWD = fileURLToPath(new URL('../../../bridge', import.meta.url))
-const STDIO_LAUNCHER = fileURLToPath(new URL('../../scripts/stdio_launcher.exs', import.meta.url))
+import { isPiBridgeVersionCompatible, piBridgeVersionMismatchMessage } from '#src/version.ts'
+
+const START_STDIO_EXPR = 'Pi.Transport.Stdio.start()'
+const BUNDLED_BRIDGE_CWD = fileURLToPath(new URL('../../../bridge', import.meta.url))
 const TOOL_CALL_TIMEOUT_MS = 120_000
 const STARTUP_OUTPUT_PREVIEW_CHARS = 8_000
 const STARTUP_OUTPUT_CHUNK_CHARS = 2_000
@@ -136,31 +140,6 @@ function failPending(entry: EmbeddedProcess, error: Error): void {
   entry.pending.clear()
 }
 
-function toolTimeoutMessage(name: string, elapsedMs: number, entry: EmbeddedProcess): string {
-  const stderr = entry.stderrPreview.join('\n').trim()
-  const lines = [
-    `Embedded BEAM tool call timed out after ${elapsedMs}ms while waiting for ${name}.`,
-    'The embedded BEAM process was stopped so the next tool call can start a fresh bridge.'
-  ]
-
-  if (stderr) {
-    lines.push('', 'Recent embedded BEAM stderr:', stderr)
-  }
-
-  return lines.join('\n')
-}
-
-function terminateTimedOutEmbedded(cwd: string, entry: EmbeddedProcess, id: number): void {
-  if (embeddedProcesses.get(cwd) !== entry) return
-
-  entry.pending.delete(id)
-  embeddedProcesses.delete(cwd)
-  connectionCache.delete(cwd)
-  failPending(entry, new Error('Embedded BEAM process stopped after a tool call timeout'))
-  entry.proc.kill()
-  emitStatusChange(cwd, null)
-}
-
 function parseMessage(line: string): StdioMessage | null {
   try {
     const message: unknown = JSON.parse(line)
@@ -179,6 +158,7 @@ function markReady(cwd: string, entry: EmbeddedProcess, url?: string): void {
     stderrBytes: entry.stderrBytes,
     stderrPreview: entry.stderrPreview.join('\n')
   })
+  clearIncompatibleDependency(cwd)
   clearUnavailable(cwd)
   invalidateCache(cwd)
   emitStatusChange(cwd, 'embedded')
@@ -260,6 +240,20 @@ async function handleBridgeRequest(
 
 function handleMessage(cwd: string, entry: EmbeddedProcess, message: StdioMessage): void {
   if (message.type === 'ready') {
+    if (message.info && !isPiBridgeVersionCompatible(message.info.version)) {
+      const error = piBridgeVersionMismatchMessage(message.info.version)
+      bridgeInfo.set(cwd, message.info)
+      markIncompatibleDependency(cwd, error)
+      embeddedFailed.add(cwd)
+      recordDiagnostic('embedded_incompatible', cwd, {
+        version: message.info.version,
+        error
+      })
+      emitStatusChange(cwd, 'incompatible')
+      stopEmbedded(cwd)
+      return
+    }
+
     if (message.info) bridgeInfo.set(cwd, message.info)
     markReady(cwd, entry)
     return
@@ -299,6 +293,13 @@ function appendStartupOutput(entry: EmbeddedProcess, text: string): void {
 function handleStdout(cwd: string, entry: EmbeddedProcess, chunk: Buffer): void {
   entry.buffer += chunk.toString()
 
+  if (entry.buffer.includes('PI_MCP_READY')) {
+    const port = entry.buffer.match(/port=(\d+)/)?.[1]
+    markReady(cwd, entry, port ? `http://127.0.0.1:${port}/mcp` : undefined)
+    entry.buffer = ''
+    return
+  }
+
   while (true) {
     const newline = entry.buffer.indexOf('\n')
     if (newline === -1) return
@@ -306,6 +307,12 @@ function handleStdout(cwd: string, entry: EmbeddedProcess, chunk: Buffer): void 
     const line = entry.buffer.slice(0, newline).trim()
     entry.buffer = entry.buffer.slice(newline + 1)
     if (!line) continue
+
+    if (line.includes('PI_MCP_READY')) {
+      const port = line.match(/port=(\d+)/)?.[1]
+      markReady(cwd, entry, port ? `http://127.0.0.1:${port}/mcp` : undefined)
+      continue
+    }
 
     const message = parseMessage(line)
     if (message) handleMessage(cwd, entry, message)
@@ -318,17 +325,22 @@ export function embeddedStartupTranscript(cwd: string): string | null {
   if (!entry || entry.ready) return null
 
   const output = entry.startupOutputPreview.join('\n').trim()
-  return output ? `$ mix do deps.get + run --no-halt <stdio-launcher>\n\n${output}` : null
+  return output ? `$ mix run --no-halt -e '<stdio-start>'\n\n${output}` : null
 }
 
-function mixChildEnv(): NodeJS.ProcessEnv {
+function mixChildEnv(projectCwd: string): NodeJS.ProcessEnv {
   const mixHome = path.join(os.homedir(), '.mix')
   return {
     ...process.env,
-    MIX_ENV: process.env.PI_ELIXIR_MIX_ENV ?? 'dev',
+    MIX_ENV: process.env.PI_ELIXIR_BRIDGE_MIX_ENV || 'dev',
     MIX_HOME: mixHome,
-    MIX_ARCHIVES: path.join(mixHome, 'archives')
+    MIX_ARCHIVES: path.join(mixHome, 'archives'),
+    PI_ELIXIR_PROJECT_CWD: projectCwd
   }
+}
+
+function bundledBridgeCwd(): string {
+  return process.env.PI_ELIXIR_BRIDGE_CWD || BUNDLED_BRIDGE_CWD
 }
 
 interface Unrefable {
@@ -371,21 +383,18 @@ export function startEmbeddedInBackground(cwd: string): void {
     return
   }
 
+  const bridgeCwd = bundledBridgeCwd()
   recordDiagnostic('embedded_start', cwd, {
-    command: 'mix do deps.get + run --no-halt <stdio-launcher>',
-    bridgeCwd: BRIDGE_CWD,
-    targetCwd: cwd,
+    command: 'mix run --no-halt -e <stdio-start>',
+    bridgeCwd,
+    projectCwd: cwd,
     mixEnv: 'dev'
   })
-  const proc = childProcess.spawn(
-    'mix',
-    ['do', 'deps.get', '+', 'run', '--no-halt', STDIO_LAUNCHER],
-    {
-      cwd: BRIDGE_CWD,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...mixChildEnv(), PI_ELIXIR_TARGET_CWD: cwd }
-    }
-  )
+  const proc = childProcess.spawn('mix', ['run', '--no-halt', '-e', START_STDIO_EXPR], {
+    cwd: bridgeCwd,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: mixChildEnv(cwd)
+  })
   unrefChildProcess(proc)
 
   const entry: EmbeddedProcess = {
@@ -534,9 +543,10 @@ export function callEmbeddedTool(
             stderrBytes: entry.stderrBytes,
             stderrPreview: entry.stderrPreview.join('\n')
           })
-          const text = toolTimeoutMessage(name, elapsedMs, entry)
-          resolveOnce({ text, isError: true })
-          terminateTimedOutEmbedded(cwd, entry, id)
+          resolveOnce({
+            text: `Embedded BEAM tool call timed out after ${elapsedMs}ms while waiting for ${name}.`,
+            isError: true
+          })
         }, TOOL_CALL_TIMEOUT_MS)
 
         const cleanup = () => {

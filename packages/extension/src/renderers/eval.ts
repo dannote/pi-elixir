@@ -154,18 +154,21 @@ function displayPathForUser(value: string | undefined): string | undefined {
 
 function bridgeSourceLabel(source: string | undefined): string {
   switch (source) {
+    case 'external-env':
+      return 'external bridge'
     case 'workspace':
       return 'current Mix project'
     case 'path-argument':
       return 'path Mix project'
+    case 'bundled-bridge':
+      return 'bundled pi_bridge'
     default:
       return 'pi_bridge'
   }
 }
 
 function renderBridgeStatus(bridge: BridgeDetails, text: string, expanded: boolean, theme: Theme) {
-  const phase =
-    bridge.phase === 'starting' || bridge.phase === 'running' ? bridge.phase : 'preparing'
+  const phase = bridge.phase === 'starting' ? 'starting' : 'preparing'
   const cwd = displayPathForUser(bridge.cwd)
   const summary = ['Elixir BEAM', phase, bridgeSourceLabel(bridge.source), cwd]
     .filter(Boolean)
@@ -179,11 +182,15 @@ function renderBridgeStatus(bridge: BridgeDetails, text: string, expanded: boole
   return renderLines(lines)
 }
 
-function isBridgeStartupTranscript(text: string) {
-  return text.includes('$ mix do deps.get') || text.includes('$ mix run --no-halt')
+function isInstallTranscript(text: string) {
+  return (
+    text.includes('$ mix deps.get') ||
+    text.includes('$ mix run --no-halt') ||
+    text.startsWith('[pi-elixir] Added ')
+  )
 }
 
-function renderBridgeStartupTranscript(text: string, expanded: boolean, theme: Theme) {
+function renderInstallTranscript(text: string, expanded: boolean, theme: Theme) {
   return renderCommandOutput(stripFinalNewline(text), expanded, theme)
 }
 
@@ -256,10 +263,9 @@ export function renderEvalResult(
   else if (payload?.error)
     component = renderErrorBlock(payload.error, expanded, theme, payload.exception)
   else if (payload) component = renderStructuredEval(payload, expanded, theme)
-  else if (bridge?.phase === 'preparing' || bridge?.phase === 'running')
+  else if (bridge?.phase === 'preparing')
     component = renderBridgeStatus(bridge, text, expanded, theme)
-  else if (isBridgeStartupTranscript(text))
-    component = renderBridgeStartupTranscript(text, expanded, theme)
+  else if (isInstallTranscript(text)) component = renderInstallTranscript(text, expanded, theme)
   else if (resultIsError(result)) component = renderErrorBlock(text, expanded, theme)
   else {
     const ioResult = parseIoResult(text)

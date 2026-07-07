@@ -1,4 +1,11 @@
-export type ConnectionKind = 'embedded' | 'starting' | 'unavailable' | null
+export type ConnectionKind =
+  | 'external'
+  | 'embedded'
+  | 'starting'
+  | 'missing'
+  | 'incompatible'
+  | 'unavailable'
+  | null
 
 export interface CachedConnection {
   url: string
@@ -9,7 +16,9 @@ export interface CachedConnection {
 type StatusListener = (cwd: string, kind: ConnectionKind) => void
 
 const statusListeners = new Set<StatusListener>()
+const missingDependency = new Set<string>()
 const unavailableReason = new Map<string, string>()
+const incompatibleDependency = new Map<string, string>()
 export const connectionCache = new Map<string, CachedConnection>()
 
 export function onStatusChange(listener: StatusListener): () => void {
@@ -29,6 +38,18 @@ export function emitStatusChange(cwd: string, kind: ConnectionKind): void {
   }
 }
 
+export function markMissingDependency(cwd: string): void {
+  missingDependency.add(cwd)
+}
+
+export function clearMissingDependency(cwd: string): void {
+  missingDependency.delete(cwd)
+}
+
+export function hasMissingDependency(cwd: string): boolean {
+  return missingDependency.has(cwd)
+}
+
 export function markUnavailable(cwd: string, message: string): void {
   unavailableReason.set(cwd, message)
 }
@@ -39,6 +60,18 @@ export function clearUnavailable(cwd: string): void {
 
 export function getUnavailableReason(cwd: string): string | undefined {
   return unavailableReason.get(cwd)
+}
+
+export function markIncompatibleDependency(cwd: string, message: string): void {
+  incompatibleDependency.set(cwd, message)
+}
+
+export function clearIncompatibleDependency(cwd: string): void {
+  incompatibleDependency.delete(cwd)
+}
+
+export function getIncompatibleDependency(cwd: string): string | undefined {
+  return incompatibleDependency.get(cwd)
 }
 
 export function invalidateCache(cwd: string): void {

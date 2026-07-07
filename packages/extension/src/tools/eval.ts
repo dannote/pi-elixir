@@ -86,6 +86,7 @@ function evalText(text: string) {
 function optionSuffix(args: ToolArgs, theme: Theme) {
   const parts: string[] = []
   if (args.mode === 'sandbox') parts.push(theme.fg('warning', 'sandbox'))
+  if (args.target === 'bridge') parts.push(theme.fg('muted', 'bridge'))
   if (typeof args.timeout === 'number') parts.push(theme.fg('muted', `${args.timeout}ms`))
   return parts.length > 0
     ? theme.fg('muted', ' (') + parts.join(theme.fg('muted', ', ')) + theme.fg('muted', ')')
@@ -208,12 +209,13 @@ export function register(pi: ExtensionAPI) {
     'elixir_eval',
     'project_eval_structured',
     'iex',
-    `Evaluate Elixir code in the running application.
+    `Evaluate Elixir code in the target Mix project.
 
-Runs inside the BEAM with full access to project modules, deps, Ecto repos, and IEx helpers.
+By default pi-elixir runs an isolated bridge VM and evaluates snippets in a separate project VM, without installing pi_bridge into the project.
+Use target: "project" for target app code/deps (default), or target: "bridge" for pi-elixir helpers such as CodeMap, AST, Self, Q, Docs, and session mirror queries.
 Use mode: "sandbox" for untrusted snippets through Dune.
 Use this instead of bash for anything Elixir — test functions, introspect modules, manipulate ASTs,
-query process state, read docs with h(), list exports with exports(), inspect values with i().
+read docs with h(), list exports with exports(), inspect values with i().
 
 Output truncated to ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)}.`,
     Type.Object({
@@ -224,14 +226,14 @@ Output truncated to ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)
             'Eval mode: trusted project introspection (default) or sandbox for untrusted code'
         })
       ),
+      target: Type.Optional(
+        Type.Union([Type.Literal('project'), Type.Literal('bridge')], {
+          description:
+            'Eval target: project VM for target app code/deps (default), or isolated bridge VM for pi-elixir helpers like CodeMap/AST/Self/Q/Docs'
+        })
+      ),
       timeout: Type.Optional(
         Type.Integer({ description: 'Timeout in ms (default: 30000 trusted, 5000 sandbox)' })
-      ),
-      reload: Type.Optional(
-        Type.Boolean({
-          description:
-            'Compile/reload project code before evaluating. Defaults to false to keep introspection fast and avoid compile-time hangs.'
-        })
       )
     }),
     renderEvalCall('iex'),

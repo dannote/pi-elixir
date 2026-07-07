@@ -2,18 +2,13 @@
 
 ## Unreleased
 
-## 0.6.22 - 2026-06-25
+## 0.7.0 - 2026-07-06
 
 ### Changed
 
-- Migrated embedded bridge communication fully to extension-owned stdio and removed the legacy MCP HTTP/JSON-RPC transport and project installer path.
-- `elixir_eval` no longer recompiles/reloads project code before every trusted eval. Use `reload: true` when an eval explicitly needs a compile/reload first.
+- Elixir tools now start the bundled `pi_bridge` in an isolated bridge VM by default instead of installing `pi_bridge` into target projects. Project eval runs in a separate target-project VM, while `target: "bridge"` keeps pi-elixir helper evals such as `CodeMap`, `AST`, `Self`, `Q`, and `Docs` in the bridge VM.
+- Eval inspect/code output now carries Lumis scope metadata with rainbow brackets so pi renderers can apply syntax highlighting using pi theme colors.
 - Loosened the `pi_bridge` Mix project (and the bundled `packages/fixtures/demo_project` fixture) `elixir:` requirement from `~> 1.20` to `~> 1.16` so legacy projects on Elixir 1.16–1.19 can adopt the bridge. New-project guidance and startup notices still recommend Elixir 1.20+ / OTP 27+ for the compiler's set-theoretic type-system improvements. The bridge now depends on `json_codec ~> 0.1.5`, which carries the same loosened Elixir requirement.
-
-### Fixed
-
-- Embedded eval timeouts now tear down wedged BEAM sessions, include recent stderr in the timeout error, and allow the next tool call to start a fresh bridge instead of waiting on a poisoned process.
-- Timed-out stateful eval sessions now kill the stuck evaluator process so later evals with the same session id can recover.
 
 ## 0.6.21 - 2026-06-14
 
