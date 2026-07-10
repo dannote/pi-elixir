@@ -5,7 +5,7 @@ Use this guidance whenever the user asks to release, publish, ship, or update a 
 ## Non-negotiable release rules
 
 - Do **not** add arbitrary links to GitHub release notes. In particular, do not add HexDocs links, Hex package links, marketing links, or generated URLs unless the user explicitly asks for them.
-- Do **not** create or edit GitHub releases unless the user explicitly asks for a GitHub release. Publishing to Hex and creating a GitHub release are separate actions.
+- A request to **release**, **publish**, or **ship** a package means the complete release workflow unless the user explicitly narrows the scope: publish the Hex package, publish HexDocs, create and push the version tag, and create the matching GitHub Release from the changelog. A request to **prepare** a release stops after release preparation and does not publish, tag, or create a GitHub Release.
 - Do **not** embellish release notes. Use the changelog wording or a terse bullet list of actual changes.
 - Always publish docs when publishing a Hex package unless the user explicitly says not to:
   ```bash
@@ -54,20 +54,25 @@ When another local project depends on the package being released:
 
 ## Publishing sequence
 
-Run package publish first, then docs:
+For a complete release, run these steps in order:
+
+1. Publish the Hex package.
+2. Publish HexDocs.
+3. Create and push the version tag.
+4. Create the GitHub Release from that version's changelog section.
 
 ```bash
 mix hex.publish package --yes
 mix hex.publish docs --yes
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-If both require 2FA and the same code is still valid, it can be piped to both commands. If either command fails due to 2FA expiry, ask for a new code.
+If both Hex commands require 2FA and the same code is still valid, it can be piped to both commands. If either command fails due to 2FA expiry, ask for a new code.
 
 ## GitHub releases
 
-Only do this when the user explicitly requests it.
-
-If requested:
+As the final step of a complete release:
 
 - Title should be exactly the tag, e.g. `v0.5.9`, unless user says otherwise.
 - Notes should be copied from `CHANGELOG.md` for that version, with no extra links.
@@ -101,6 +106,8 @@ Report only what happened:
 
 - package version published
 - docs published
+- version tag pushed
+- GitHub Release created
 - tests/smokes run
 - downstream update commit if any
 - repo clean/synced status
