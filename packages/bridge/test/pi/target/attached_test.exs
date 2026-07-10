@@ -5,6 +5,7 @@ defmodule Pi.Target.AttachedTest do
 
   setup_all do
     unless Node.alive?() do
+      {_, 0} = System.cmd("epmd", ["-daemon"], stderr_to_stdout: true)
       {:ok, _pid} = Node.start(:pi_attached_test, name_domain: :shortnames)
     end
 

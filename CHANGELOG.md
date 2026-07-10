@@ -30,7 +30,8 @@
 - Project-local plugins and executable skills are discovered from the explicit target root while the control bridge remains isolated.
 - `CodeMap.smells(path: ...)` now normalizes Reach `location` fields into file/line data, removes leading colons from kinds, and prioritizes high-impact/high-confidence findings before applying the default limit.
 - Compact project/application/runtime eval renders a bounded one-line inspect preview instead of the first pretty-printed token such as `%{`.
-- Cold-start, unavailable, and incompatible bridge failures now persist as real tool errors instead of being downgraded by pi-agent-core's extension-tool result lifecycle.
+- Cold-start, unavailable, and incompatible bridge failures now persist as real tool errors instead of being downgraded by pi-agent-core's extension-tool result lifecycle. Cold target startup gets its full startup allowance outside the per-eval timeout, and workers inherit the active Mix environment instead of assuming `dev`.
+- Attached-runtime startup now ensures `epmd` is running before starting local distribution, including on clean CI hosts.
 - QuackDB startup no longer advertises a `localhost` endpoint that has no listening socket, and failed schema startup now cleans up partially started resources.
 
 ### Removed

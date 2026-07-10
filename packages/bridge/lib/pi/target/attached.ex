@@ -131,7 +131,28 @@ defmodule Pi.Target.Attached do
   defp valid_node_part?(_part), do: false
 
   defp ensure_distribution(opts) do
-    with :ok <- maybe_start_node(), do: configure_cookie(opts)
+    with :ok <- ensure_epmd(),
+         :ok <- maybe_start_node(),
+         do: configure_cookie(opts)
+  end
+
+  defp ensure_epmd do
+    if Node.alive?() do
+      :ok
+    else
+      System.find_executable("epmd")
+      |> start_epmd()
+    end
+  end
+
+  defp start_epmd(nil),
+    do: {:error, %{kind: :epmd_unavailable, message: "epmd is not available on PATH"}}
+
+  defp start_epmd(executable) do
+    case System.cmd(executable, ["-daemon"], stderr_to_stdout: true) do
+      {_output, 0} -> :ok
+      {output, status} -> {:error, %{kind: :epmd_start_failed, status: status, output: output}}
+    end
   end
 
   defp maybe_start_node do

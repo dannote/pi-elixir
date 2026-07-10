@@ -65,8 +65,14 @@ defmodule Pi.Project.Context do
   defp mix_env(opts) do
     opts
     |> Keyword.get_lazy(:mix_env, fn ->
-      System.get_env("PI_ELIXIR_PROJECT_MIX_ENV") || System.get_env("MIX_ENV") || "dev"
+      System.get_env("PI_ELIXIR_PROJECT_MIX_ENV") || current_mix_env()
     end)
     |> to_string()
+  end
+
+  defp current_mix_env do
+    if Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0),
+      do: Mix.env(),
+      else: System.get_env("MIX_ENV") || "dev"
   end
 end

@@ -35,6 +35,17 @@ defmodule Pi.Project.ContextTest do
     end
   end
 
+  test "defaults to the active Mix environment instead of assuming dev" do
+    previous_env = System.get_env("PI_ELIXIR_PROJECT_MIX_ENV")
+    System.delete_env("PI_ELIXIR_PROJECT_MIX_ENV")
+
+    try do
+      assert Context.current(root: System.tmp_dir!()).mix_env == Atom.to_string(Mix.env())
+    after
+      restore_env("PI_ELIXIR_PROJECT_MIX_ENV", previous_env)
+    end
+  end
+
   defp restore_env(key, nil), do: System.delete_env(key)
   defp restore_env(key, value), do: System.put_env(key, value)
 end

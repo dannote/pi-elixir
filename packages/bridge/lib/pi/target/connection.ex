@@ -30,11 +30,16 @@ defmodule Pi.Target.Connection do
 
   def eval(pid, code, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, 30_000)
-    GenServer.call(pid, {:eval, code, opts}, timeout + 5_000)
+    GenServer.call(pid, {:eval, code, opts}, timeout + @startup_timeout + 5_000)
   end
 
   def request(pid, operation, payload, timeout \\ 30_000),
-    do: GenServer.call(pid, {:request, operation, payload, timeout}, timeout + 5_000)
+    do:
+      GenServer.call(
+        pid,
+        {:request, operation, payload, timeout},
+        timeout + @startup_timeout + 5_000
+      )
 
   def status(pid), do: GenServer.call(pid, :status)
 
