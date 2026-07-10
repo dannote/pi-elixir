@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.1 - 2026-07-10
+
+### Fixed
+
+- The npm package now includes the target-worker bootstrap script required by project and application eval. Package validation requires this runtime file so a source-checkout-only smoke cannot hide a broken published artifact.
+
 ## 0.8.0 - 2026-07-10
 
 ### Added

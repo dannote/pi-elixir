@@ -37,7 +37,8 @@ const requiredFiles = [
   'packages/bridge/docs/protocol.md',
   'packages/bridge/lib/pi/session.ex',
   'packages/bridge/lib/pi/session/worker.ex',
-  'packages/bridge/lib/pi/transport/stdio.ex'
+  'packages/bridge/lib/pi/transport/stdio.ex',
+  'packages/bridge/priv/target/bootstrap.exs'
 ] as const
 
 const forbiddenPatterns = [
