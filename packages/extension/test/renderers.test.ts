@@ -147,6 +147,41 @@ describe('elixir result rendering', () => {
     expect(compact).not.toContain('✓')
   })
 
+  it('uses the one-line inspect title instead of the first pretty-printed line', () => {
+    const body =
+      '%{\n  modules: 42,\n  missing_moduledoc: [:Alpha, :Beta],\n  undocumented_count: 7\n}'
+    const title = '%{modules: 42, missing_moduledoc: [:Alpha, :Beta], undocumented_count: 7}'
+    const result = evalResult({
+      result: body,
+      parts: [
+        {
+          kind: 'inspect',
+          body,
+          title,
+          language: 'elixir',
+          data: {
+            highlight: {
+              engine: 'lumis',
+              language: 'elixir',
+              lines: [
+                [{ text: '%{', scopes: [] }],
+                [{ text: '  modules: 42,', scopes: [] }],
+                [{ text: '  missing_moduledoc: [:Alpha, :Beta],', scopes: [] }],
+                [{ text: '  undocumented_count: 7', scopes: [] }],
+                [{ text: '}', scopes: [] }]
+              ]
+            }
+          }
+        }
+      ]
+    })
+
+    const compact = textOf(renderElixirResult(result, { expanded: false, isPartial: false }, theme))
+
+    expect(compact).toContain(title)
+    expect(compact).not.toBe('\n%{ (ctrl+o to expand)')
+  })
+
   it('recomputes compact hints when the terminal width changes', () => {
     const result = evalResult({
       result:

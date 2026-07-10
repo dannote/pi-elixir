@@ -1,6 +1,6 @@
 # pi-elixir
 
-BEAM runtime tools for [pi](https://github.com/earendil-works/pi-coding-agent). `pi-elixir` connects pi to the running Elixir application for live eval, runtime inspection, and structural Elixir code operations. It brings ideas from [Vibe](https://github.com/elixir-vibe/vibe) into pi: compact tools, BEAM runtime truth, executable Elixir skills, project-local plugins, and OTP-backed subagents.
+BEAM runtime tools for [pi](https://github.com/earendil-works/pi-coding-agent). `pi-elixir` provides an isolated control bridge, persistent project/application workers, opt-in attachment to existing distributed nodes, and structural Elixir code operations. It brings ideas from [Vibe](https://github.com/elixir-vibe/vibe) into pi: compact tools, BEAM runtime truth, executable Elixir skills, project-local plugins, and OTP-backed subagents.
 
 ## Repository shape
 
@@ -18,35 +18,28 @@ The npm package is still the user-facing install target. The `pi_bridge` Mix pac
 pi install npm:pi-elixir
 ```
 
-Works with Phoenix apps, libraries, monorepos with a nested Mix project, and other Mix projects. When a pi tool needs the embedded server and the project does not have Pi BEAM tools installed, pi asks for confirmation, adds a dev-only exact `:pi_bridge` dependency to `mix.exs`, runs `mix deps.get`, then starts the server:
-
-```elixir
-{:pi_bridge, "== 0.6.21", only: :dev}
-```
-
-The exact version is deliberate: the TypeScript extension and BEAM bridge are released together and must speak the same stdio protocol. If the installed `pi_bridge` version differs from the extension version, pi reports the mismatch and asks you to update the Mix dependency.
+Works with Phoenix apps, libraries, monorepos with a nested Mix project, and other Mix projects. No target-project dependency or `mix.exs` edit is required. The npm package starts its bundled `pi_bridge` in an isolated control VM, then starts a separate dependencyless target worker. The extension accepts ready state only after validating the bridge build, protocol, and required capabilities.
 
 Check the current bridge quickly with `/elixir:status`. Use `/elixir:doctor` for full environment and startup diagnostics.
 
 ## How it connects
 
-The normal path is embedded stdio. The extension starts `Pi.Transport.Stdio` in the Mix project and sends line-delimited protocol messages over the child process pipes. If Pi BEAM tools are missing, the agent asks before editing `mix.exs` and running `mix deps.get`.
+The normal path is embedded stdio. The extension starts `Pi.Transport.Stdio` from the bundled bridge project and sends line-delimited protocol messages over the child process pipes. `PI_ELIXIR_PROJECT_CWD` identifies the target Mix project; project/application eval happens in a separate persistent worker, while attached-runtime eval uses `PI_ELIXIR_NODE`.
 
 HTTP MCP endpoints are advanced/debug escape hatches. Resolution order:
 
 1. **Explicit HTTP MCP endpoint** — `PI_MCP_URL`, only when manually configured.
-2. **Discovered HTTP MCP endpoint** — probes local dev ports and matches `project_name` to the `app:` in `mix.exs`.
-3. **Embedded stdio transport** — default fallback inside the project.
+2. **Discovered HTTP MCP endpoint** — probes local dev ports and matches the endpoint's structured `project_root` to the target root. A sole legacy endpoint without `project_root` remains unambiguous.
+3. **Bundled embedded stdio transport** — default isolated control bridge for the target project.
 
 Status bar output is intentionally transport-focused and actionable:
 
 | Status | Meaning |
 |---|---|
-| `⬡ BEAM` | Connected to an external or discovered BEAM MCP endpoint, such as a Phoenix/Tidewave server whose `project_name` matches `mix.exs` `app:`. |
-| `⬡ BEAM (embedded)` | Connected to the extension-owned stdio BEAM running `Pi.Transport.Stdio` inside this Mix project. |
-| `⬡ BEAM starting…` | The embedded stdio process has been launched and is compiling/booting; retry the tool after it reaches ready. |
-| `⬡ BEAM tools missing` | This Mix project does not yet depend on `:pi_bridge`; the first BEAM tool call can prompt to add the dev-only dependency and run `mix deps.get`. |
-| `⬡ BEAM offline` | No BEAM connection is available: no matching external endpoint, embedded fallback disabled, not a Mix project, or embedded startup failed after tools were installed. |
+| `⬡ BEAM` | Connected to an external or discovered BEAM MCP endpoint whose structured project identity matches the target root. |
+| `⬡ BEAM (embedded)` | Connected to the extension-owned isolated stdio control bridge for this target project. |
+| `⬡ BEAM starting…` | The bundled control bridge is compiling/booting and has not completed its capability handshake. |
+| `⬡ BEAM offline` | No BEAM connection is available: no matching external endpoint, embedded fallback disabled, not a Mix project, or bundled bridge startup failed. |
 
 It does **not** show package versions, optional integration guesses, or project telemetry such as Phoenix/Ecto/Oban/Volt/Iconify presence. Put those checks in explicit `elixir_eval` snippets, project prompts, or skills.
 
@@ -219,7 +212,7 @@ The JS extension maps these to pi status, widgets, and notifications. Pi lifecyc
 
 | Tool | What it does |
 |---|---|
-| `elixir_eval` | Evaluate code inside the running app with IEx helpers, project modules, deps, config, processes, and runtime state |
+| `elixir_eval` | Evaluate in the persistent dependencyless project VM (default), managed application VM, attached runtime node, or isolated bridge VM |
 | `elixir_ast_search` | Search Elixir code by AST pattern instead of text/regex |
 | `elixir_ast_replace` | Rewrite Elixir code by AST pattern instead of brittle text replacement |
 

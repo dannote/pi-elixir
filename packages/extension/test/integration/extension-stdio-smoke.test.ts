@@ -9,6 +9,11 @@ import {
   startEmbeddedInBackground,
   stopEmbedded
 } from '#src/embedded/stdio-process.ts'
+import {
+  BRIDGE_PROTOCOL_VERSION,
+  EXPECTED_BRIDGE_BUILD,
+  REQUIRED_BRIDGE_CAPABILITIES
+} from '#src/version.ts'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const PROJECT_DIR =
@@ -113,9 +118,12 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
 
       expect(info?.project).toBe('pi_demo_project')
       expect(info?.transport).toBe('stdio')
+      expect(info?.protocol).toBe(BRIDGE_PROTOCOL_VERSION)
+      expect(info?.build).toBe(EXPECTED_BRIDGE_BUILD)
+      expect(info?.capabilities).toEqual(expect.arrayContaining([...REQUIRED_BRIDGE_CAPABILITIES]))
       expect(info?.apis?.runtime?.some((api) => api.name === 'llm')).toBe(true)
-      expect(info?.skills ?? []).toEqual([])
-      expect(info?.plugins ?? []).toEqual([])
+      expect(info?.skills?.map((skill) => skill.name)).toContain('demo-skill')
+      expect(info?.plugins?.map((plugin) => plugin.name)).toContain('DemoPlugin')
     })
 
     it('routes Pi.LLM.complete through the extension request handler', async () => {

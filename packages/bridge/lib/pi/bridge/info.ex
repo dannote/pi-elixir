@@ -12,6 +12,17 @@ defmodule Pi.Bridge.Info do
   alias Pi.Protocol.SkillInfo
   alias Pi.Skill.Loader
 
+  @protocol_version 2
+  @capabilities [
+    :stdio_jsonl,
+    :bridge_requests,
+    :project_eval_worker,
+    :application_eval_worker,
+    :attached_runtime_eval,
+    :structured_diagnostics,
+    :project_context
+  ]
+
   @runtime_api_modules [
     agent: Pi.Agent,
     llm: Pi.LLM,
@@ -28,10 +39,15 @@ defmodule Pi.Bridge.Info do
   ]
 
   def snapshot(transport \\ :stdio) do
+    version = bridge_version()
+
     %BridgeInfo{
       project: project_app(),
-      version: bridge_version(),
+      version: version,
+      build: "pi_bridge@#{version}/protocol-#{@protocol_version}",
+      protocol: @protocol_version,
       transport: transport,
+      capabilities: @capabilities,
       skills: skills(),
       plugins: plugins(),
       commands: commands(),

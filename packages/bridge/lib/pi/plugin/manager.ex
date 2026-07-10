@@ -6,6 +6,7 @@ defmodule Pi.Plugin.Manager do
   alias Pi.Mirror.QuackDB, as: QuackDBMirror
   alias Pi.Plugin.Supervisor, as: PluginSupervisor
   alias Pi.Plugin.Worker
+  alias Pi.Project.Context
   alias Pi.Protocol.PluginInfo
 
   defstruct children: %{}, monitors: %{}, refs: %{}
@@ -294,10 +295,12 @@ defmodule Pi.Plugin.Manager do
   defp behaviours(module), do: module.module_info(:attributes) |> Keyword.get(:behaviour, [])
 
   defp default_paths do
+    root = Context.current().root
+
     [
-      Path.join(File.cwd!(), "priv/pi_plugins"),
-      Path.join(File.cwd!(), ".pi/plugins"),
-      Path.join(File.cwd!(), "pi_plugins")
+      Path.join(root, "priv/pi_plugins"),
+      Path.join(root, ".pi/plugins"),
+      Path.join(root, "pi_plugins")
     ]
   end
 

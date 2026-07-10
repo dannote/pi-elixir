@@ -16,6 +16,13 @@ defmodule Pi.SyntaxTest do
            end)
   end
 
+  test "structured Lumis scopes preserve escaped text and line boundaries" do
+    source = "value = \"<& 😀\"\n:ok"
+
+    assert {:ok, %{lines: lines}} = Pi.Syntax.highlight(source, language: :elixir)
+    assert Enum.map_join(lines, "\n", &Enum.map_join(&1, fn span -> span.text end)) == source
+  end
+
   test "metadata is empty for oversized inputs" do
     source = String.duplicate("{", 101 * 1024)
     assert Pi.Syntax.metadata(source, language: :elixir) == %{}

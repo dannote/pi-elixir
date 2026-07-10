@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 const PROJECT_DIR =
   process.env.PI_ELIXIR_INTEGRATION_PROJECT ??
   path.resolve(__dirname, '../../../fixtures/demo_project')
+const BRIDGE_DIR = path.resolve(__dirname, '../../../bridge')
 const START_STDIO_EXPR = 'Pi.Transport.Stdio.start()'
 const STARTUP_TIMEOUT = 120_000
 
@@ -24,7 +25,7 @@ type StdioMessage = {
 }
 
 function ensureDeps(): void {
-  execSync('mix deps.get', { cwd: PROJECT_DIR, stdio: 'pipe' })
+  execSync('mix deps.get', { cwd: BRIDGE_DIR, stdio: 'pipe' })
 }
 
 function hasElixir(): boolean {
@@ -110,9 +111,14 @@ describe.skipIf(!elixirAvailable || !projectAvailable)('embedded stdio transport
     ensureDeps()
     queue = new JsonLineQueue()
     proc = spawn('mix', ['run', '--no-halt', '-e', START_STDIO_EXPR], {
-      cwd: PROJECT_DIR,
+      cwd: BRIDGE_DIR,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, MIX_ENV: 'test' }
+      env: {
+        ...process.env,
+        MIX_ENV: 'test',
+        PI_ELIXIR_PROJECT_CWD: PROJECT_DIR,
+        PI_ELIXIR_MIRROR: '0'
+      }
     })
 
     proc.stdout?.on('data', (chunk: Buffer) => queue.push(chunk))
@@ -177,7 +183,10 @@ describe.skipIf(!elixirAvailable || !projectAvailable)('embedded stdio transport
   })
 
   it('routes a BEAM-initiated LLM request back to the waiting eval call', async () => {
-    const resultPromise = call('project_eval', { code: 'Pi.LLM.complete("hello")' })
+    const resultPromise = call('project_eval', {
+      code: 'Pi.LLM.complete("hello")',
+      target: 'bridge'
+    })
     const request = await queue.next((message) => message.type === 'request')
 
     expect(request.op).toBe('llm_complete')
@@ -193,6 +202,7 @@ describe.skipIf(!elixirAvailable || !projectAvailable)('embedded stdio transport
   it('routes BEAM-initiated LLM stream chunks and done events', async () => {
     const resultPromise = call('project_eval', {
       code: 'Pi.LLM.stream("stream").stream |> Enum.join()',
+      target: 'bridge',
       timeout: 5_000
     })
     const request = await queue.next((message) => message.type === 'request')
@@ -214,7 +224,7 @@ first = Task.async(fn -> Pi.LLM.complete("first") end)
 second = Task.async(fn -> Pi.LLM.complete("second") end)
 [Task.await(first), Task.await(second)]
 `
-    const resultPromise = call('project_eval', { code })
+    const resultPromise = call('project_eval', { code, target: 'bridge' })
     const requests = [
       await queue.next((message) => message.type === 'request'),
       await queue.next((message) => message.type === 'request')

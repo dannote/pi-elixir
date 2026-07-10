@@ -89,6 +89,6 @@ end)
 
 LiveView templates are pure functions of assigns. When you can reconstruct assigns from a recording, render the target view with the project’s existing helpers or `Phoenix.LiveViewTest` helpers.
 
-Do not use `phoenix_vapor` for this workflow yet. It currently pulls QuickBEAM compiler internals through its published dependency graph, which is not part of the stable webdev verification path.
+Do not add `phoenix_vapor` for this workflow unless the user explicitly requests it and its current capabilities are required.
 
 Do not claim a replay-based fix is verified unless you name the recording, the event index or assign delta inspected, and the rendered output or failure you checked.

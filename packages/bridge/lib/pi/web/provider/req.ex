@@ -237,34 +237,42 @@ defmodule Pi.Web.Provider.Req do
   end
 
   defp title(body, content_type) do
-    if html?(content_type) do
-      case Regex.run(~r/<title[^>]*>(.*?)<\/title>/is, body, capture: :all_but_first) do
-        [title] -> title |> html_entities() |> String.replace(~r/\s+/, " ") |> String.trim()
-        _none -> nil
-      end
+    with true <- html?(content_type),
+         {:ok, document} <- Floki.parse_document(body),
+         [title | _rest] <- Floki.find(document, "title") do
+      title
+      |> Floki.text(sep: " ")
+      |> normalize_text()
+    else
+      _none -> nil
     end
   end
 
   defp html_to_text(html) do
-    html
-    |> String.replace(~r/<(script|style|noscript|template)[^>]*>.*?<\/\1>/is, " ")
-    |> String.replace(~r/<br\s*\/?>/i, "\n")
-    |> String.replace(~r/<\/(p|div|section|article|main|header|footer|h[1-6]|li)>/i, "\n")
-    |> String.replace(~r/<[^>]+>/, " ")
-    |> html_entities()
-    |> String.replace(~r/[ \t]+/, " ")
-    |> String.replace(~r/\n\s+/, "\n")
-    |> String.replace(~r/\n{3,}/, "\n\n")
-    |> String.trim()
+    case Floki.parse_document(html) do
+      {:ok, document} ->
+        document
+        |> remove_non_content_nodes()
+        |> Floki.text(sep: "\n")
+        |> String.split("\n")
+        |> Enum.map(&normalize_text/1)
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.join("\n")
+
+      _error ->
+        html
+    end
   end
 
-  defp html_entities(text) do
+  defp remove_non_content_nodes(document) do
+    Enum.reduce(~w[script style noscript template], document, fn selector, current ->
+      Floki.filter_out(current, selector)
+    end)
+  end
+
+  defp normalize_text(text) do
     text
-    |> String.replace("&nbsp;", " ")
-    |> String.replace("&amp;", "&")
-    |> String.replace("&lt;", "<")
-    |> String.replace("&gt;", ">")
-    |> String.replace("&quot;", "\"")
-    |> String.replace("&#39;", "'")
+    |> String.split()
+    |> Enum.join(" ")
   end
 end

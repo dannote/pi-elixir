@@ -86,7 +86,9 @@ function evalText(text: string) {
 function optionSuffix(args: ToolArgs, theme: Theme) {
   const parts: string[] = []
   if (args.mode === 'sandbox') parts.push(theme.fg('warning', 'sandbox'))
-  if (args.target === 'bridge') parts.push(theme.fg('muted', 'bridge'))
+  if (typeof args.target === 'string' && args.target !== 'project') {
+    parts.push(theme.fg('muted', args.target))
+  }
   if (typeof args.timeout === 'number') parts.push(theme.fg('muted', `${args.timeout}ms`))
   return parts.length > 0
     ? theme.fg('muted', ' (') + parts.join(theme.fg('muted', ', ')) + theme.fg('muted', ')')
@@ -209,13 +211,9 @@ export function register(pi: ExtensionAPI) {
     'elixir_eval',
     'project_eval_structured',
     'iex',
-    `Evaluate Elixir code in the target Mix project.
+    `Evaluate Elixir in a persistent target VM. Prefer this over shell for project APIs, runtime state, dependencies, docs, processes, and typed data pipelines.
 
-By default pi-elixir runs an isolated bridge VM and evaluates snippets in a separate project VM, without installing pi_bridge into the project.
-Use target: "project" for target app code/deps (default), or target: "bridge" for pi-elixir helpers such as CodeMap, AST, Self, Q, Docs, and session mirror queries.
-Use mode: "sandbox" for untrusted snippets through Dune.
-Use this instead of bash for anything Elixir — test functions, introspect modules, manipulate ASTs,
-read docs with h(), list exports with exports(), inspect values with i().
+Targets: "project" loads code/deps without application startup (default); "application" starts the managed app; "runtime" attaches to PI_ELIXIR_NODE; "bridge" provides pi-elixir helpers (AST, CodeMap, Self, Q, Docs). Use "sandbox" for untrusted snippets. Use the AST tools—not eval or text replacement—for structural source search/refactors.
 
 Output truncated to ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)}.`,
     Type.Object({
@@ -227,10 +225,18 @@ Output truncated to ${DEFAULT_MAX_LINES} lines / ${formatSize(DEFAULT_MAX_BYTES)
         })
       ),
       target: Type.Optional(
-        Type.Union([Type.Literal('project'), Type.Literal('bridge')], {
-          description:
-            'Eval target: project VM for target app code/deps (default), or isolated bridge VM for pi-elixir helpers like CodeMap/AST/Self/Q/Docs'
-        })
+        Type.Union(
+          [
+            Type.Literal('project'),
+            Type.Literal('application'),
+            Type.Literal('bridge'),
+            Type.Literal('runtime')
+          ],
+          {
+            description:
+              'Eval target: persistent project VM (default), managed application VM, isolated bridge helpers, or explicitly attached runtime node'
+          }
+        )
       ),
       timeout: Type.Optional(
         Type.Integer({ description: 'Timeout in ms (default: 30000 trusted, 5000 sandbox)' })

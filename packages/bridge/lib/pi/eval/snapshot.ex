@@ -1,6 +1,8 @@
 defmodule Pi.Eval.Snapshot do
   @moduledoc "Sidecar representation for durable eval session state snapshots."
 
+  alias Pi.Target.Runtime.Term
+
   @version 2
   @default_max_bytes 10 * 1_024 * 1_024
 
@@ -60,7 +62,7 @@ defmodule Pi.Eval.Snapshot do
 
   @spec serializable_binding(Code.binding()) :: Code.binding()
   def serializable_binding(binding) when is_list(binding) do
-    Enum.filter(binding, fn {_name, value} -> serializable_term?(value) end)
+    Enum.filter(binding, fn {_name, value} -> Term.serializable?(value) end)
   end
 
   defp decode(binary) when is_binary(binary) do
@@ -230,23 +232,4 @@ defmodule Pi.Eval.Snapshot do
   rescue
     _exception in [ArgumentError] -> byte_size(inspect(value, limit: 20))
   end
-
-  defp serializable_term?(term)
-       when is_pid(term) or is_port(term) or is_reference(term) or is_function(term),
-       do: false
-
-  defp serializable_term?(term) when is_list(term), do: Enum.all?(term, &serializable_term?/1)
-
-  defp serializable_term?(term) when is_tuple(term) do
-    term |> Tuple.to_list() |> Enum.all?(&serializable_term?/1)
-  end
-
-  defp serializable_term?(%_module{} = term),
-    do: term |> Map.from_struct() |> serializable_term?()
-
-  defp serializable_term?(term) when is_map(term) do
-    Enum.all?(term, fn {key, value} -> serializable_term?(key) and serializable_term?(value) end)
-  end
-
-  defp serializable_term?(_term), do: true
 end

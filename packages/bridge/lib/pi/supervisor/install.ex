@@ -5,6 +5,15 @@ defmodule Pi.Supervisor.Install do
     DynamicSupervisor.start_link(module, opts, name: module)
   end
 
+  def ensure(module) do
+    case dynamic(module) do
+      :ok -> :ok
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      error -> error
+    end
+  end
+
   def dynamic(module) do
     case Process.whereis(module) do
       nil ->

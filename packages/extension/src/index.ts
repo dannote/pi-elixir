@@ -11,11 +11,7 @@ import { showStartupInfo } from './bridge/startup-info.ts'
 import { registerBridgeToolHooks } from './bridge/tool-hooks.ts'
 import { applyBridgeUIEvent, updateStatus } from './bridge/ui-events.ts'
 import { resolveUrl, getConnectionKind, sendBridgeEvent } from './connection/resolver.ts'
-import {
-  getIncompatibleDependency,
-  onStatusChange,
-  type ConnectionKind
-} from './connection/status.ts'
+import { getIncompatibleBridge, onStatusChange, type ConnectionKind } from './connection/status.ts'
 import {
   markTurnEnd,
   markTurnStart,
@@ -34,7 +30,6 @@ import {
 } from './embedded/stdio-process.ts'
 import { flags } from './flags.ts'
 import { sessionContext } from './helpers.ts'
-import { ensurePiBeamDependency } from './mix/installer.ts'
 import { resolveMixProjectCwd } from './mix/project.ts'
 import { registerSessionCommands } from './sessions/commands.ts'
 import { renderSessionMessage } from './sessions/render.ts'
@@ -56,7 +51,7 @@ interface StatusSubscription {
   unsubscribeRequests: () => void
 }
 
-type ElixirNoticeKind = 'missing' | 'incompatible' | 'unavailable'
+type ElixirNoticeKind = 'incompatible' | 'unavailable'
 
 interface ElixirNoticeDetails {
   kind: ElixirNoticeKind
@@ -79,22 +74,14 @@ function hasBridgePlugins(cwd: string): boolean {
 
 function noticeForKind(cwd: string, kind: ElixirNoticeKind): ElixirNoticeDetails {
   switch (kind) {
-    case 'missing':
-      return {
-        kind,
-        cwd,
-        title: 'Elixir tools are not installed',
-        message:
-          'This Mix project does not have the pi_bridge dev dependency installed. Run an Elixir tool to install it when prompted.'
-      }
     case 'incompatible':
       return {
         kind,
         cwd,
         title: 'Elixir tools version mismatch',
         message:
-          getIncompatibleDependency(cwd) ??
-          'The pi_bridge dependency version does not match this pi-elixir extension.'
+          getIncompatibleBridge(cwd) ??
+          'The bundled pi_bridge does not satisfy this extension runtime contract.'
       }
     case 'unavailable':
       return {
@@ -111,7 +98,7 @@ function noticeForKind(cwd: string, kind: ElixirNoticeKind): ElixirNoticeDetails
 }
 
 function noticeKind(kind: ConnectionKind): ElixirNoticeKind | undefined {
-  if (kind === 'missing' || kind === 'incompatible' || kind === 'unavailable') return kind
+  if (kind === 'incompatible' || kind === 'unavailable') return kind
   return undefined
 }
 
@@ -149,36 +136,6 @@ export default function (pi: ExtensionAPI) {
       registerBridgeCommand(pi, command, registeredCommands, resolveElixirCwd)
     }
     registerBridgeToolHooks(pi, resolveElixirCwd, hasBridgePlugins)
-  }
-
-  if (!registeredCommands.has('elixir:install')) {
-    registeredCommands.add('elixir:install')
-    pi.registerCommand('elixir:install', {
-      description: 'Install the pi_bridge dev dependency in this Mix project',
-      handler: async (_args, ctx) => {
-        const beamCwd = resolveElixirCwd(ctx.cwd)
-        if (!beamCwd) {
-          ctx.ui.notify('/elixir:install must be run from an Elixir/Mix project', 'error')
-          return
-        }
-
-        try {
-          const installed = await ensurePiBeamDependency(beamCwd, {
-            confirmInstall: async () => true,
-            onProgress: (message) => {
-              if (message) ctx.ui.notify(message, 'info')
-            }
-          })
-          ctx.ui.notify(
-            installed ? 'Pi BEAM tools are installed' : 'Pi BEAM tools were not installed',
-            installed ? 'info' : 'warning'
-          )
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          ctx.ui.notify(`Pi BEAM tools install failed:\n${message}`, 'error')
-        }
-      }
-    })
   }
 
   if (!registeredCommands.has('elixir:doctor')) {

@@ -7,11 +7,13 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 const PROJECT_DIR =
   process.env.PI_ELIXIR_INTEGRATION_PROJECT ??
   path.resolve(__dirname, '../../../fixtures/demo_project')
+const BRIDGE_DIR = path.resolve(__dirname, '../../../bridge')
 const START_SERVER_EXPR = 'Pi.MCP.Server.start!(System.argv())'
 const STARTUP_TIMEOUT = 120_000
 
 function ensureDeps(): void {
-  execSync('mix deps.get', { cwd: PROJECT_DIR, stdio: 'pipe' })
+  execSync('mix deps.get', { cwd: BRIDGE_DIR, stdio: 'pipe' })
+  execSync('mix compile', { cwd: PROJECT_DIR, stdio: 'pipe' })
 }
 
 function hasElixir(): boolean {
@@ -63,8 +65,13 @@ describe.skipIf(!elixirAvailable || !projectAvailable)('embedded MCP server', ()
         'mix',
         ['run', '--no-halt', '-e', START_SERVER_EXPR, '--', '--port', '0'],
         {
-          cwd: PROJECT_DIR,
-          stdio: ['pipe', 'pipe', 'pipe']
+          cwd: BRIDGE_DIR,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            PI_ELIXIR_PROJECT_CWD: PROJECT_DIR,
+            PI_ELIXIR_MIRROR: '0'
+          }
         }
       )
 
@@ -80,13 +87,30 @@ describe.skipIf(!elixirAvailable || !projectAvailable)('embedded MCP server', ()
         stderr += chunk.toString()
       })
 
+      let stdout = ''
       proc.stdout?.on('data', (chunk: Buffer) => {
-        const text = chunk.toString()
-        const match = text.match(/PI_MCP_READY port=(\d+)/)
-        if (match) {
-          baseUrl = `http://127.0.0.1:${match[1]}`
-          clearTimeout(timeout)
-          resolve()
+        stdout += chunk.toString()
+        const lines = stdout.split('\n')
+        stdout = lines.pop() ?? ''
+
+        for (const line of lines) {
+          try {
+            const message: unknown = JSON.parse(line)
+            if (
+              typeof message === 'object' &&
+              message !== null &&
+              'event' in message &&
+              message.event === 'pi_mcp_ready' &&
+              'port' in message &&
+              typeof message.port === 'number'
+            ) {
+              baseUrl = `http://127.0.0.1:${message.port}`
+              clearTimeout(timeout)
+              resolve()
+            }
+          } catch {
+            // Mix may write non-protocol startup output before the JSON readiness event.
+          }
         }
       })
 
@@ -110,6 +134,7 @@ describe.skipIf(!elixirAvailable || !projectAvailable)('embedded MCP server', ()
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.project_name).toBe('pi_demo_project')
+    expect(body.project_root).toBe(PROJECT_DIR)
     expect(body.framework_type).toBe('embedded')
   })
 
@@ -149,12 +174,12 @@ describe.skipIf(!elixirAvailable || !projectAvailable)('embedded MCP server', ()
     expect(result.text).toBe('2')
   })
 
-  it('project_eval can access project modules', async () => {
+  it('project_eval loads project modules without loading pi_bridge into the target', async () => {
     const result = await mcpCall(baseUrl, 'project_eval', {
-      code: 'Code.ensure_loaded?(Pi)'
+      code: '{Code.ensure_loaded?(PiDemoProject), Code.ensure_loaded?(Pi)}'
     })
     expect(result.isError).toBeFalsy()
-    expect(result.text).toBe('true')
+    expect(result.text).toBe('{true, false}')
   })
 
   describe('ex_ast_search', () => {

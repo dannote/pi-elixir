@@ -11,11 +11,6 @@ import {
   sendEmbeddedEvent,
   startEmbeddedInBackground
 } from '#src/embedded/stdio-process.ts'
-import {
-  ensurePiBeamDependency,
-  type InstallOptions,
-  type InstallPrompt
-} from '#src/mix/installer.ts'
 import { elixirRuntimeProblem } from '#src/mix/runtime.ts'
 import type { BridgeEvent, ToolArgs, ToolResult } from '#src/protocol/types.ts'
 import { callHttpTool, discoverExternalMCP } from '#src/transport/http-json-rpc.ts'
@@ -23,16 +18,15 @@ import { callHttpTool, discoverExternalMCP } from '#src/transport/http-json-rpc.
 import {
   clearUnavailable,
   connectionCache,
-  getIncompatibleDependency,
+  getIncompatibleBridge,
   getUnavailableReason,
-  hasMissingDependency,
   markUnavailable,
   type ConnectionKind
 } from './status.ts'
 
-export type { ConnectionKind, InstallPrompt }
+export type { ConnectionKind }
 
-export interface ResolveUrlOptions extends InstallOptions {
+export interface ResolveUrlOptions {
   ignoreExternal?: boolean
 }
 
@@ -103,7 +97,7 @@ export async function resolveUrl(
       return null
     }
 
-    const incompatible = getIncompatibleDependency(cwd)
+    const incompatible = getIncompatibleBridge(cwd)
     if (incompatible) {
       recordDiagnostic('resolve_url_phase', cwd, { phase: 'incompatible_dependency' })
       return null
@@ -120,20 +114,8 @@ export async function resolveUrl(
     }
     clearUnavailable(cwd)
 
-    const failedBeforeInstall = hasEmbeddedFailed(cwd)
-    const missingBeforeInstall = hasMissingDependency(cwd)
-    const dependencyReady =
-      process.env.PI_ELIXIR_PROJECT_DEP === '1'
-        ? await withDiagnosticSpan('ensure_pi_beam_dependency', cwd, undefined, async () =>
-            ensurePiBeamDependency(cwd, options)
-          )
-        : true
-    if (!dependencyReady) {
-      recordDiagnostic('resolve_url_phase', cwd, { phase: 'dependency_unavailable' })
-      return null
-    }
-    if (failedBeforeInstall && !missingBeforeInstall) {
-      recordDiagnostic('resolve_url_phase', cwd, { phase: 'embedded_failed_before_install' })
+    if (hasEmbeddedFailed(cwd)) {
+      recordDiagnostic('resolve_url_phase', cwd, { phase: 'embedded_failed' })
       return null
     }
     clearEmbeddedFailed(cwd)
@@ -160,8 +142,7 @@ export function getStartupTranscript(cwd: string): string | null {
 export function getConnectionKind(cwd: string): ConnectionKind {
   const cached = connectionCache.get(cwd)
   if (cached) return cached.kind
-  if (getIncompatibleDependency(cwd)) return 'incompatible'
+  if (getIncompatibleBridge(cwd)) return 'incompatible'
   if (getUnavailableReason(cwd)) return 'unavailable'
-  if (hasMissingDependency(cwd)) return 'missing'
   return getEmbeddedKind(cwd)
 }

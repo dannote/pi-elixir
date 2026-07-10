@@ -18,7 +18,6 @@ describe('Elixir connection status UI', () => {
     'external',
     'embedded',
     'starting',
-    'missing',
     'incompatible',
     'unavailable',
     null

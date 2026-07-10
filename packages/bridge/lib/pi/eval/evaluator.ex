@@ -4,7 +4,7 @@ defmodule Pi.Eval.Evaluator do
   use GenServer
 
   alias Pi.Bridge.Info
-  alias Pi.Eval.{ExceptionInfo, Snapshot}
+  alias Pi.Eval.{Diagnostics, ExceptionInfo, Snapshot}
   alias Pi.Eval.Output, as: EvalOutput
   alias Pi.Output
   alias Pi.Protocol.Tool.Eval, as: EvalPayload
@@ -102,17 +102,26 @@ defmodule Pi.Eval.Evaluator do
   end
 
   defp eval_with_captured_io(code, state) do
-    {{success?, result, state}, io} = EvalOutput.capture_io(fn -> eval_code(code, state) end)
+    {{success?, result, state, diagnostics}, io} =
+      EvalOutput.capture_io(fn -> eval_code(code, state) end)
 
     cond do
       success? ->
         state = apply_control(state)
         persist_meta = persist(state)
-        {{:ok, structured_result(result, io, state, persist_meta)}, state}
+        {{:ok, structured_result(result, io, state, persist_meta, diagnostics)}, state}
 
       io != "" ->
         text = "IO:\n\n#{io}\n\nError:\n\n#{EvalOutput.error_text(result)}"
-        {{:error, error_result(text, io, state, EvalOutput.error_exception(result))}, state}
+
+        {{:error,
+          error_result(
+            text,
+            io,
+            state,
+            EvalOutput.error_exception(result),
+            diagnostics
+          )}, state}
 
       true ->
         {{:error,
@@ -120,7 +129,8 @@ defmodule Pi.Eval.Evaluator do
             EvalOutput.error_text(result),
             io,
             state,
-            EvalOutput.error_exception(result)
+            EvalOutput.error_exception(result),
+            diagnostics
           )}, state}
     end
   end
@@ -130,9 +140,9 @@ defmodule Pi.Eval.Evaluator do
     Process.put(@binding_info_key, Snapshot.binding_info(state.binding))
     Process.delete(@control_key)
 
-    try do
-      {result, _diagnostics} =
-        Code.with_diagnostics([log: false], fn ->
+    {result, diagnostics} =
+      Code.with_diagnostics([log: false], fn ->
+        try do
           quoted =
             Code.string_to_quoted!(prepend_aliases(code), file: eval_file(state.session_id))
 
@@ -141,27 +151,37 @@ defmodule Pi.Eval.Evaluator do
 
           state = %{state | binding: merge_binding(state.binding, binding), env: env}
           {true, result, state}
-        end)
+        catch
+          kind, reason ->
+            stacktrace = __STACKTRACE__
+            text = Exception.format(kind, reason, stacktrace)
 
-      result
-    catch
-      kind, reason ->
-        stacktrace = __STACKTRACE__
-        text = Exception.format(kind, reason, stacktrace)
+            {false, %{text: text, exception: ExceptionInfo.payload(kind, reason, stacktrace)},
+             state}
+        end
+      end)
 
-        {false, %{text: text, exception: ExceptionInfo.payload(kind, reason, stacktrace)}, state}
-    after
-      Process.delete(@session_id_key)
-      Process.delete(@binding_info_key)
-    end
+    diagnostics = Diagnostics.normalize(diagnostics)
+    {success?, value, next_state} = result
+    {success?, value, next_state, diagnostics}
+  after
+    Process.delete(@session_id_key)
+    Process.delete(@binding_info_key)
   end
 
-  defp structured_result(:"do not show this result in output", io, state, persist_meta) do
+  defp structured_result(
+         :"do not show this result in output",
+         io,
+         state,
+         persist_meta,
+         diagnostics
+       ) do
     parts = if io == "", do: [], else: [OutputPart.text(io)]
 
     %EvalPayload{
       io: io,
       result: nil,
+      diagnostics: diagnostics,
       text: io,
       parts: parts,
       display: EvalOutput.display(parts),
@@ -170,7 +190,7 @@ defmodule Pi.Eval.Evaluator do
     }
   end
 
-  defp structured_result(result, io, state, persist_meta) do
+  defp structured_result(result, io, state, persist_meta, diagnostics) do
     explicit_text = Output.text_for(result)
     inspected = explicit_text || EvalOutput.inspect_value(result)
     preview = EvalOutput.preview(result)
@@ -191,6 +211,7 @@ defmodule Pi.Eval.Evaluator do
     %EvalPayload{
       io: io,
       result: inspected,
+      diagnostics: diagnostics,
       text: text,
       parts: parts,
       display: EvalOutput.display(parts),
@@ -199,13 +220,15 @@ defmodule Pi.Eval.Evaluator do
     }
   end
 
-  defp error_result(text, io, state, exception) do
+  defp error_result(text, io, state, exception, diagnostics) do
+    text = Diagnostics.append_to_error(text, diagnostics)
     parts = [] |> EvalOutput.maybe_io_part(io) |> Kernel.++([OutputPart.error(text)])
 
     %EvalPayload{
       io: io,
       error: text,
       exception: exception,
+      diagnostics: diagnostics,
       text: text,
       parts: parts,
       display: EvalOutput.display(parts),

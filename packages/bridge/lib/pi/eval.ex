@@ -2,7 +2,7 @@ defmodule Pi.Eval do
   @moduledoc "Runs bounded Elixir evals inside the project BEAM."
 
   alias Pi.Bridge.Info
-  alias Pi.Eval.{Evaluator, ExceptionInfo, Sandbox, Supervisor}
+  alias Pi.Eval.{Diagnostics, Evaluator, ExceptionInfo, Sandbox, Supervisor}
   alias Pi.Eval.Output, as: EvalOutput
   alias Pi.Output
   alias Pi.Protocol.Tool.Eval, as: EvalPayload
@@ -127,38 +127,42 @@ defmodule Pi.Eval do
   end
 
   defp eval_with_captured_io(code, mode) do
-    {{success?, result}, io} =
+    {{{success?, result}, raw_diagnostics}, io} =
       EvalOutput.capture_io(fn ->
-        try do
-          {result, _bindings} = Code.eval_string(code, [arguments: []], env())
-          {true, result}
-        catch
-          kind, reason ->
-            stacktrace = __STACKTRACE__
-            text = Exception.format(kind, reason, stacktrace)
+        Code.with_diagnostics([log: false], fn ->
+          try do
+            {result, _bindings} = Code.eval_string(code, [arguments: []], env())
+            {true, result}
+          catch
+            kind, reason ->
+              stacktrace = __STACKTRACE__
+              text = Exception.format(kind, reason, stacktrace)
 
-            {false, %{text: text, exception: ExceptionInfo.payload(kind, reason, stacktrace)}}
-        end
+              {false, %{text: text, exception: ExceptionInfo.payload(kind, reason, stacktrace)}}
+          end
+        end)
       end)
 
-    formatted = format_eval_result(result, success?, io)
+    diagnostics = Diagnostics.normalize(raw_diagnostics)
+    formatted = format_eval_result(result, success?, io, diagnostics)
 
     case mode do
-      :structured -> structured_eval_result(result, success?, io, formatted)
+      :structured -> structured_eval_result(result, success?, io, formatted, diagnostics)
       :text -> formatted
     end
   end
 
-  defp format_eval_result(result, success?, io) do
+  defp format_eval_result(result, success?, io, diagnostics) do
     case {result, success?, io} do
       {:"do not show this result in output", true, io} ->
         {:ok, io}
 
       {result, false, ""} ->
-        {:error, EvalOutput.error_text(result)}
+        {:error, Diagnostics.append_to_error(EvalOutput.error_text(result), diagnostics)}
 
       {result, false, io} ->
-        {:error, "IO:\n\n#{io}\n\nError:\n\n#{EvalOutput.error_text(result)}"}
+        text = "IO:\n\n#{io}\n\nError:\n\n#{EvalOutput.error_text(result)}"
+        {:error, Diagnostics.append_to_error(text, diagnostics)}
 
       {result, true, ""} ->
         {:ok, EvalOutput.inspect_value(result)}
@@ -168,20 +172,27 @@ defmodule Pi.Eval do
     end
   end
 
-  defp structured_eval_result(:"do not show this result in output", true, io, {:ok, text}) do
+  defp structured_eval_result(
+         :"do not show this result in output",
+         true,
+         io,
+         {:ok, text},
+         diagnostics
+       ) do
     parts = if io == "", do: [], else: [OutputPart.text(io)]
 
     {:ok,
      %EvalPayload{
        io: io,
        result: nil,
+       diagnostics: diagnostics,
        text: text,
        parts: parts,
        display: EvalOutput.display(parts)
      }}
   end
 
-  defp structured_eval_result(result, true, io, {:ok, text}) do
+  defp structured_eval_result(result, true, io, {:ok, text}, diagnostics) do
     explicit_text = Output.text_for(result)
     inspected = explicit_text || EvalOutput.inspect_value(result)
     preview = EvalOutput.preview(result)
@@ -205,13 +216,14 @@ defmodule Pi.Eval do
      %EvalPayload{
        io: io,
        result: inspected,
+       diagnostics: diagnostics,
        text: explicit_text || text,
        parts: parts,
        display: EvalOutput.display(parts)
      }}
   end
 
-  defp structured_eval_result(result, false, io, {:error, text}) do
+  defp structured_eval_result(result, false, io, {:error, text}, diagnostics) do
     parts =
       []
       |> EvalOutput.maybe_io_part(io)
@@ -222,6 +234,7 @@ defmodule Pi.Eval do
        io: io,
        error: text,
        exception: EvalOutput.error_exception(result),
+       diagnostics: diagnostics,
        text: text,
        parts: parts,
        display: EvalOutput.display(parts)

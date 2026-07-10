@@ -1,4 +1,5 @@
-import { readAppName } from '#src/mix/project.ts'
+import path from 'node:path'
+
 import type { JsonRpcResponse, McpConfig, ToolArgs, ToolResult } from '#src/protocol/types.ts'
 
 let requestId = 0
@@ -13,6 +14,7 @@ function isMcpConfig(value: unknown): value is McpConfig {
     value !== null &&
     'project_name' in value &&
     typeof value.project_name === 'string' &&
+    (!('project_root' in value) || typeof value.project_root === 'string') &&
     'framework_type' in value &&
     typeof value.framework_type === 'string'
   )
@@ -20,7 +22,12 @@ function isMcpConfig(value: unknown): value is McpConfig {
 
 async function fetchConfig(baseUrl: string): Promise<McpConfig | null> {
   try {
-    const resp = await fetch(baseUrl.replace(/\/mcp$/, '/config'), {
+    const configUrl = new URL(baseUrl)
+    configUrl.pathname = configUrl.pathname.endsWith('/mcp')
+      ? `${configUrl.pathname.slice(0, -'/mcp'.length)}/config`
+      : configUrl.pathname
+
+    const resp = await fetch(configUrl, {
       signal: AbortSignal.timeout(1000)
     })
     if (!resp.ok) return null
@@ -32,8 +39,6 @@ async function fetchConfig(baseUrl: string): Promise<McpConfig | null> {
 }
 
 export async function discoverExternalMCP(cwd: string): Promise<string | null> {
-  const appName = readAppName(cwd)
-
   const probes = PROBE_PORTS.map(async (port) => {
     const url = `http://localhost:${port}/mcp`
     const config = await fetchConfig(url)
@@ -45,9 +50,19 @@ export async function discoverExternalMCP(cwd: string): Promise<string | null> {
   )
 
   if (results.length === 0) return null
-  if (!appName) return results[0].url
 
-  return results.find((result) => result.config.project_name === appName)?.url ?? null
+  const projectRoot = path.resolve(cwd)
+  const matchingRoot = results.find(
+    (result) =>
+      result.config.project_root !== undefined &&
+      path.resolve(result.config.project_root) === projectRoot
+  )
+  if (matchingRoot) return matchingRoot.url
+
+  // Older external bridges do not report a root. A sole candidate remains unambiguous;
+  // multiple candidates require the structured project_root identity.
+  if (results.length === 1 && results[0].config.project_root === undefined) return results[0].url
+  return null
 }
 
 export async function callHttpTool(

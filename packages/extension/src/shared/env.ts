@@ -23,10 +23,3 @@ export function parseIntegerEnv(name: string): ParseEnvResult<number> {
     ? parsed
     : { ok: false, message: `${name} must be an integer` }
 }
-
-export function parseDelimitedEnvList(name: string, delimiter: RegExp = /[\n,]/u): string[] {
-  return (optionalEnv(name) ?? '')
-    .split(delimiter)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-}

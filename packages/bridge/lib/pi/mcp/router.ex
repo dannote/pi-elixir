@@ -3,16 +3,21 @@ defmodule Pi.MCP.Router do
 
   use Plug.Router
 
+  alias Pi.Bridge.Info
   alias Pi.MCP.JSONRPC
+  alias Pi.Project.Context
 
   plug(:match)
   plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
   plug(:dispatch)
 
   get "/config" do
+    context = Context.current()
+
     body =
       Jason.encode!(%{
-        project_name: Mix.Project.config()[:app] |> Atom.to_string(),
+        project_name: Info.snapshot(:http).project |> Atom.to_string(),
+        project_root: context.root,
         framework_type: "embedded"
       })
 

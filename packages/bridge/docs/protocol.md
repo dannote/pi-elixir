@@ -8,8 +8,20 @@ The bridge keeps protocol data as JSONCodec structs internally. These examples s
 {
   "type": "ready",
   "info": {
-    "project": "pi_bridge",
+    "project": "my_app",
+    "version": "0.8.0",
+    "build": "pi_bridge@0.8.0/protocol-2",
+    "protocol": 2,
     "transport": "stdio",
+    "capabilities": [
+      "stdio_jsonl",
+      "bridge_requests",
+      "project_eval_worker",
+      "application_eval_worker",
+      "attached_runtime_eval",
+      "structured_diagnostics",
+      "project_context"
+    ],
     "skills": [],
     "plugins": [],
     "apis": {
@@ -26,10 +38,14 @@ The bridge keeps protocol data as JSONCodec structs internally. These examples s
 }
 ```
 
+The extension accepts ready state only when `build`, `protocol`, and every required capability match. On a stale handshake it atomically replaces the child once, then reports incompatibility if the replacement still fails.
+
 ## Stdio tool call/result
 
+`target` is decoded once by `JSONCodec` into the canonical enum `project | application | runtime | bridge`; internal dispatch never accepts duplicate string/atom representations. `project` is the default dependencyless persistent target. `application` starts the target application, `runtime` attaches to `PI_ELIXIR_NODE`, and `bridge` evaluates control-plane helpers.
+
 ```json
-{ "type": "call", "id": 1, "name": "project_eval", "arguments": { "code": "1 + 1" } }
+{ "type": "call", "id": 1, "name": "project_eval", "arguments": { "code": "1 + 1", "target": "project" } }
 ```
 
 ```json

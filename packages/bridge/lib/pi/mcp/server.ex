@@ -11,7 +11,10 @@ defmodule Pi.MCP.Server do
 
     {actual_port, http_server} = start_http(port)
     wait_until_accepting(actual_port)
-    IO.puts("PI_MCP_READY port=#{actual_port} server=#{http_server}")
+
+    IO.puts(
+      Jason.encode!(%{event: "pi_mcp_ready", port: actual_port, server: inspect(http_server)})
+    )
 
     receive do
       :stop -> :ok

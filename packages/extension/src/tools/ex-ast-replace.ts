@@ -51,9 +51,7 @@ export function register(pi: ExtensionAPI) {
     'elixir_ast_replace',
     'ex_ast_replace',
     'ast edit',
-    `Replace Elixir code by AST pattern using ExAST. Patterns are valid Elixir syntax.
-Captures from the pattern are substituted into the replacement by name.
-Requires ex_ast as a project dependency.
+    `Rewrite Elixir source by AST pattern. Prefer this over regex/text replacement for structural changes and broad refactors. Captures are substituted into the replacement by name. ExAST runs in pi-elixir's isolated bridge; the target project needs no dependency.
 
 Examples:
 - pattern: 'IO.inspect(expr, _)' replacement: 'Logger.debug(inspect(expr))'

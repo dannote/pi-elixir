@@ -14,19 +14,17 @@ defmodule Pi.Protocol.Tool.EvalRequest do
   ]
 
   @type mode :: :trusted | :sandbox
-  @type target :: :project | :bridge
+  @type target :: :project | :application | :bridge | :runtime
   @type t :: %__MODULE__{
           code: String.t(),
           timeout: non_neg_integer() | nil,
-          mode: mode(),
-          target: target(),
+          mode: :trusted | :sandbox,
+          target: :project | :application | :bridge | :runtime,
           session_id: String.t() | nil,
           state_path: String.t() | nil,
           restore_path: String.t() | nil
         }
 
-  codec(:mode, atom: {:enum, [:trusted, :sandbox]})
-  codec(:target, atom: {:enum, [:project, :bridge]})
   codec(:session_id, as: "sessionId")
   codec(:state_path, as: "statePath")
   codec(:restore_path, as: "restorePath")

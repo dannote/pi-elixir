@@ -9,6 +9,7 @@ defmodule Pi.Mirror.QuackDB do
 
   use Pi.Plugin
 
+  alias Pi.Mirror.QuackDB.Lifecycle
   alias Pi.Plugin.UI
 
   @table "pi_events"
@@ -16,6 +17,7 @@ defmodule Pi.Mirror.QuackDB do
   @default_batch_size 1
   @sync_batch_size 5_000
   @sync_progress_key :elixir_quack_sync
+  @sync_supervisor Pi.Mirror.QuackDB.SyncSupervisor
   @fts_columns [
     :event_type,
     :cwd,
@@ -79,7 +81,7 @@ defmodule Pi.Mirror.QuackDB do
     state = ensure_enabled(state)
 
     args
-    |> String.split(~r/\s+/, trim: true)
+    |> String.split()
     |> case do
       ["sync" | rest] ->
         start_sync(state, rest)
@@ -109,7 +111,7 @@ defmodule Pi.Mirror.QuackDB do
 
   def handle_command(:"quack.sync", args, state) do
     state = ensure_enabled(state)
-    start_sync(state, String.split(args, ~r/\s+/, trim: true))
+    start_sync(state, String.split(args))
   end
 
   def handle_command(:"quack.index", _args, state) do
@@ -171,25 +173,67 @@ defmodule Pi.Mirror.QuackDB do
   def tool_result(_result, _context, state), do: {:ok, state}
 
   @impl true
-  def shutdown(%{supervisor: supervisor} = state) when is_pid(supervisor) do
+  def shutdown(%{enabled?: true} = state) do
     _state = flush(state)
-    if Process.alive?(supervisor), do: Supervisor.stop(supervisor)
-    :ok
-  catch
-    :exit, _reason -> :ok
+    Lifecycle.stop()
   end
 
   def shutdown(_state), do: :ok
 
-  defp start_mirror do
-    with :ok <- ensure_quackdb(),
-         {:ok, supervisor, conn} <- start_quackdb(),
-         :ok <- ensure_schema(conn) do
-      {:ok, %{enabled?: true, supervisor: supervisor, conn: conn, buffer: []}}
-    else
-      {:error, reason} ->
-        {:ok, %{enabled?: false, error: inspect(reason)}}
+  @doc false
+  def await_sync(state, timeout \\ 30_000)
+
+  def await_sync(%{sync_task: task}, timeout) when is_pid(task) do
+    monitor = Process.monitor(task)
+
+    receive do
+      {:DOWN, ^monitor, :process, ^task, :normal} -> :ok
+      {:DOWN, ^monitor, :process, ^task, reason} -> {:error, reason}
+    after
+      timeout ->
+        Process.demonitor(monitor, [:flush])
+        {:error, :timeout}
     end
+  end
+
+  def await_sync(_state, _timeout), do: {:error, :not_started}
+
+  defp start_mirror do
+    case Lifecycle.ensure_started() do
+      {:ok, resources} -> {:ok, Map.merge(resources, %{enabled?: true, buffer: []})}
+      {:error, reason} -> {:ok, %{enabled?: false, error: inspect(reason)}}
+    end
+  end
+
+  @doc false
+  def start_mirror_resources do
+    with :ok <- ensure_quackdb(),
+         {:ok, supervisor, conn} <- start_quackdb() do
+      initialize_mirror(supervisor, conn)
+    end
+  end
+
+  defp initialize_mirror(supervisor, conn) do
+    case ensure_schema(conn) do
+      :ok ->
+        {:ok, %{supervisor: supervisor, conn: conn}}
+
+      {:error, reason} ->
+        stop_supervisor(supervisor)
+        {:error, reason}
+    end
+  catch
+    kind, reason ->
+      stacktrace = __STACKTRACE__
+      stop_supervisor(supervisor)
+      {:error, {:schema_initialization_failed, kind, reason, stacktrace}}
+  end
+
+  defp stop_supervisor(supervisor) do
+    if Process.alive?(supervisor), do: Supervisor.stop(supervisor)
+    :ok
+  catch
+    :exit, _reason -> :ok
   end
 
   defp ensure_enabled(%{enabled?: true} = state), do: state
@@ -219,8 +263,8 @@ defmodule Pi.Mirror.QuackDB do
     client_name = __MODULE__.Client
     token = "pi_elixir_mirror_#{System.unique_integer([:positive])}"
     port = mirror_port()
-    endpoint = "quack:localhost:#{port}"
-    uri = System.get_env("PI_ELIXIR_MIRROR_QUACKDB_URI") || "http://localhost:#{port}"
+    endpoint = "quack:127.0.0.1:#{port}"
+    uri = System.get_env("PI_ELIXIR_MIRROR_QUACKDB_URI") || "http://127.0.0.1:#{port}"
 
     server_opts =
       [
@@ -231,7 +275,8 @@ defmodule Pi.Mirror.QuackDB do
         uri: uri,
         token: mirror_token(token),
         wait_timeout: mirror_wait_timeout(),
-        poll_interval: 25
+        poll_interval: 25,
+        daemon_options: mirror_daemon_options()
       ]
       |> compact_keyword()
 
@@ -250,6 +295,8 @@ defmodule Pi.Mirror.QuackDB do
       else
         QuackDB.Server.child_specs(server: server_opts, client: client_opts)
       end
+
+    children = children ++ [{Task.Supervisor, name: @sync_supervisor}]
 
     case Supervisor.start_link(children, strategy: :one_for_one) do
       {:ok, supervisor} -> {:ok, supervisor, client_name}
@@ -405,12 +452,30 @@ defmodule Pi.Mirror.QuackDB do
   defp start_sync(%{enabled?: true} = state, args) do
     state = flush(state)
 
-    Task.start(fn -> run_sync(state, args) end)
+    case Map.get(state, :sync_task) do
+      task when is_pid(task) ->
+        if Process.alive?(task) do
+          {{:error, "🦆 sync already running"}, state}
+        else
+          launch_sync(state, args)
+        end
 
-    {{:ok, "🦆 sync started in background"}, state}
+      _other ->
+        launch_sync(state, args)
+    end
   end
 
   defp start_sync(state, _args), do: {{:error, status_text(state)}, state}
+
+  defp launch_sync(state, args) do
+    case Task.Supervisor.start_child(@sync_supervisor, fn -> run_sync(state, args) end) do
+      {:ok, task} ->
+        {{:ok, "🦆 sync started in background"}, Map.put(state, :sync_task, task)}
+
+      {:error, reason} ->
+        {{:error, "🦆 sync could not start · #{inspect(reason)}"}, state}
+    end
+  end
 
   defp run_sync(state, args) do
     case sync_files(state, args) do
@@ -906,6 +971,10 @@ defmodule Pi.Mirror.QuackDB do
   defp sync_batch_size do
     System.get_env("PI_ELIXIR_MIRROR_SYNC_BATCH_SIZE", Integer.to_string(@sync_batch_size))
     |> String.to_integer()
+  end
+
+  defp mirror_daemon_options do
+    if System.get_env("PI_ELIXIR_DEBUG") == "1", do: [log_output: :debug], else: []
   end
 
   defp mirror_wait_timeout do

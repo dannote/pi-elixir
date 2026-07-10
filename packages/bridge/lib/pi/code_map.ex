@@ -64,13 +64,14 @@ defmodule Pi.CodeMap.Smell do
   @moduledoc "A Reach smell finding normalized for eval."
   use JSONCodec
 
-  defstruct [:kind, :message, :file, :line, :raw]
+  defstruct [:kind, :message, :file, :line, :confidence, :raw]
 
   @type t :: %__MODULE__{
           kind: String.t() | nil,
           message: String.t() | nil,
           file: String.t() | nil,
           line: non_neg_integer() | nil,
+          confidence: String.t() | nil,
           raw: map() | nil
         }
 end
@@ -114,6 +115,7 @@ defmodule Pi.CodeMap do
   """
 
   alias Pi.CodeMap.{Boundary, FunctionRef, Hotspot, Reflection, Smell}
+  alias Pi.Project.Context
   alias Pi.Protocol.Tool.OutputPart
   alias Reach.Check.Smells, as: ReachSmells
   alias Reach.Inspect.Context, as: ReachContext
@@ -126,6 +128,19 @@ defmodule Pi.CodeMap do
   @default_depth 3
   @reflection_hotspot_top 8
   @reflection_smell_top 12
+  @high_impact_smells ~w[
+    bare_rescue
+    dual_key_access
+    ets_partial_key_match
+    false_success_error
+    map_contract_drift
+    missing_external_resource
+    return_contract_drift
+    side_effect_order_drift
+    unsafe_atom_creation
+    unsafe_binary_to_term
+    validation_drift
+  ]
 
   @doc "Returns true when Reach is available in the current project BEAM."
   def available?, do: Code.ensure_loaded?(Reach.Project)
@@ -133,20 +148,17 @@ defmodule Pi.CodeMap do
   @doc "Builds a Reach project graph for the current Mix project or selected paths."
   def project(opts \\ []) do
     ensure_reach!()
+    context = Context.current(opts)
 
-    cond do
-      paths = opts[:paths] ->
-        paths |> List.wrap() |> expand_paths() |> Reach.Project.from_sources(project_opts(opts))
+    paths =
+      cond do
+        paths = opts[:paths] -> expand_paths(paths, context)
+        glob = opts[:glob] -> expand_paths([glob], context)
+        path = opts[:path] -> expand_paths(List.wrap(path), context)
+        true -> project_source_paths(context)
+      end
 
-      glob = opts[:glob] ->
-        Reach.Project.from_glob(glob, project_opts(opts))
-
-      path = opts[:path] ->
-        path |> List.wrap() |> expand_paths() |> Reach.Project.from_sources(project_opts(opts))
-
-      true ->
-        Reach.Project.from_mix_project(project_opts(opts))
-    end
+    Reach.Project.from_sources(paths, project_opts(opts))
   end
 
   @doc "Returns a project-wide Reach summary."
@@ -247,6 +259,7 @@ defmodule Pi.CodeMap do
     |> ReachSmells.run([])
     |> Enum.map(&smell/1)
     |> filter_by_path(path)
+    |> Enum.sort_by(&smell_sort_key/1)
     |> Enum.take(opts[:top] || @default_top)
   end
 
@@ -287,19 +300,27 @@ defmodule Pi.CodeMap do
   defp opts_with_top(opts), do: Keyword.put_new(opts, :top, @default_top)
   defp project_opts(opts), do: Keyword.take(opts, [:plugins, :source_only])
 
-  defp expand_paths(paths) do
+  defp expand_paths(paths, context) do
     paths
     |> List.wrap()
     |> Enum.flat_map(fn path ->
+      resolved = Context.resolve(context, to_string(path))
+
       cond do
-        File.dir?(path) -> Path.wildcard(Path.join(path, "**/*.{ex,erl,gleam,js,ts}"))
-        String.contains?(path, "*") -> Path.wildcard(path)
-        true -> [path]
+        File.dir?(resolved) -> Path.wildcard(Path.join(resolved, "**/*.{ex,erl,gleam,js,ts}"))
+        String.contains?(resolved, "*") -> Path.wildcard(resolved)
+        true -> [resolved]
       end
     end)
     |> Enum.filter(&File.regular?/1)
     |> Enum.uniq()
     |> Enum.sort()
+  end
+
+  defp project_source_paths(context) do
+    ["lib", "src", "apps/*/lib", "apps/*/src"]
+    |> Enum.map(&Path.join(&1, "**/*.{ex,erl,gleam,js,ts}"))
+    |> expand_paths(context)
   end
 
   defp function_context(project, target, opts) do
@@ -419,17 +440,24 @@ defmodule Pi.CodeMap do
       opts[:changed] == false -> []
       true -> changed_files()
     end
-    |> Enum.filter(&String.match?(&1, ~r/\.(ex|erl|gleam|js|ts)$/))
+    |> Enum.filter(&(Path.extname(&1) in ~w[.ex .erl .gleam .js .ts]))
     |> Enum.uniq()
     |> Enum.sort()
   end
 
   defp changed_files do
-    {unstaged, _} = System.cmd("git", ["diff", "--name-only"], stderr_to_stdout: true)
-    {staged, _} = System.cmd("git", ["diff", "--cached", "--name-only"], stderr_to_stdout: true)
+    context = Context.current()
+
+    {unstaged, _} =
+      Context.command(context, "git", ["diff", "--name-only"], stderr_to_stdout: true)
+
+    {staged, _} =
+      Context.command(context, "git", ["diff", "--cached", "--name-only"], stderr_to_stdout: true)
 
     {untracked, _} =
-      System.cmd("git", ["ls-files", "--others", "--exclude-standard"], stderr_to_stdout: true)
+      Context.command(context, "git", ["ls-files", "--others", "--exclude-standard"],
+        stderr_to_stdout: true
+      )
 
     (String.split(unstaged, "\n", trim: true) ++
        String.split(staged, "\n", trim: true) ++ String.split(untracked, "\n", trim: true))
@@ -468,7 +496,12 @@ defmodule Pi.CodeMap do
   end
 
   defp changed_line_ranges(path) do
-    case System.cmd("git", ["diff", "--unified=0", "--", path], stderr_to_stdout: true) do
+    context = Context.current()
+    relative_path = Context.relative(context, path)
+
+    case Context.command(context, "git", ["diff", "--unified=0", "--", relative_path],
+           stderr_to_stdout: true
+         ) do
       {diff, 0} -> parse_hunks(diff)
       {diff, _} -> parse_hunks(diff)
     end
@@ -477,13 +510,31 @@ defmodule Pi.CodeMap do
   end
 
   defp parse_hunks(diff) do
-    ~r/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/m
-    |> Regex.scan(diff)
-    |> Enum.map(fn
-      [_match, start] -> {String.to_integer(start), 1}
-      [_match, start, ""] -> {String.to_integer(start), 1}
-      [_match, start, count] -> {String.to_integer(start), String.to_integer(count)}
-    end)
+    diff
+    |> String.split("\n")
+    |> Enum.flat_map(&parse_hunk_line/1)
+  end
+
+  defp parse_hunk_line("@@ " <> header) do
+    with [_removed, "+" <> added | _context] <- String.split(header, " ", parts: 3),
+         [start_text | count_text] <- String.split(added, ",", parts: 2),
+         {start, ""} <- Integer.parse(start_text),
+         {:ok, count} <- parse_hunk_count(count_text) do
+      [{start, count}]
+    else
+      _ -> []
+    end
+  end
+
+  defp parse_hunk_line(_line), do: []
+
+  defp parse_hunk_count([]), do: {:ok, 1}
+
+  defp parse_hunk_count([count_text]) do
+    case Integer.parse(count_text) do
+      {count, ""} -> {:ok, count}
+      _ -> :error
+    end
   end
 
   defp function_summary(func) do
@@ -629,16 +680,78 @@ defmodule Pi.CodeMap do
 
   defp smell(finding) do
     raw = normalize(finding)
+    {location_file, location_line} = smell_location(raw["location"])
+    source = map_or_empty(raw["source"])
 
     %{
-      "kind" => raw["kind"] || raw["check"] || raw["name"],
-      "message" => raw["message"] || raw["description"] || raw["trigger"],
-      "file" => raw["file"] || raw["path"] || get_in(raw, ["source", "file"]),
-      "line" => raw["line"] || get_in(raw, ["source", "line"]),
+      "kind" => raw |> first_present(~w[kind check name]) |> normalize_label(),
+      "message" => first_present(raw, ~w[message description trigger]),
+      "file" => first_present([raw["file"], raw["path"], source["file"], location_file]),
+      "line" =>
+        first_present([
+          normalize_line(raw["line"]),
+          normalize_line(source["line"]),
+          location_line
+        ]),
+      "confidence" => normalize_label(raw["confidence"]),
       "raw" => raw
     }
     |> Smell.from_map!()
   end
+
+  defp map_or_empty(value) when is_map(value), do: value
+  defp map_or_empty(_value), do: %{}
+
+  defp first_present(map, keys) when is_map(map),
+    do: keys |> Enum.map(&Map.get(map, &1)) |> first_present()
+
+  defp first_present(values), do: Enum.find(values, &(not is_nil(&1)))
+
+  defp smell_location(location) when is_binary(location) do
+    case location |> String.split(":") |> List.pop_at(-1) do
+      {line_text, file_parts} when file_parts != [] ->
+        case Integer.parse(line_text) do
+          {line, ""} -> {Enum.join(file_parts, ":"), line}
+          _invalid -> {location, nil}
+        end
+
+      _invalid ->
+        {location, nil}
+    end
+  end
+
+  defp smell_location(_location), do: {nil, nil}
+
+  defp normalize_line(line) when is_integer(line), do: line
+
+  defp normalize_line(line) when is_binary(line) do
+    case Integer.parse(line) do
+      {number, ""} -> number
+      _invalid -> nil
+    end
+  end
+
+  defp normalize_line(_line), do: nil
+
+  defp normalize_label(":" <> label), do: label
+  defp normalize_label(label) when is_binary(label), do: label
+  defp normalize_label(_label), do: nil
+
+  defp smell_sort_key(%Smell{} = finding) do
+    {
+      if(finding.kind in @high_impact_smells, do: 0, else: 1),
+      confidence_priority(finding.confidence),
+      if(is_binary(finding.file), do: 0, else: 1),
+      finding.file || "",
+      finding.line || 0,
+      finding.kind || ""
+    }
+  end
+
+  defp confidence_priority("high"), do: 0
+  defp confidence_priority("medium"), do: 1
+  defp confidence_priority("low"), do: 2
+  defp confidence_priority(_confidence), do: 3
 
   defp normalize_call_tree(nodes) do
     Enum.map(nodes, fn node ->

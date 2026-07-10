@@ -2,6 +2,7 @@ defmodule Pi.Skill.Loader do
   @moduledoc "Discovers trusted executable Elixir skills in the current Mix project."
 
   alias Pi.Plugin.API
+  alias Pi.Project.Context
   alias Pi.Protocol.API.Extension
   alias Pi.Protocol.SkillInfo
   alias Pi.Skill.Executable
@@ -77,10 +78,12 @@ defmodule Pi.Skill.Loader do
   end
 
   defp default_paths do
+    root = Context.current().root
+
     [
-      Path.join(File.cwd!(), "priv/skills"),
-      Path.join(File.cwd!(), ".pi/skills"),
-      Path.join(File.cwd!(), "skills")
+      Path.join(root, "priv/skills"),
+      Path.join(root, ".pi/skills"),
+      Path.join(root, "skills")
     ] ++ dependency_skill_paths()
   end
 

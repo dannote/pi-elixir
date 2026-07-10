@@ -9,8 +9,17 @@ defmodule Pi.Bridge.InfoTest do
   test "snapshot returns a strict protocol struct" do
     version = Application.spec(:pi_bridge, :vsn) |> to_string()
 
-    assert %BridgeInfo{project: :pi_bridge, version: ^version, transport: :stdio} =
-             Info.snapshot(:stdio)
+    assert %BridgeInfo{
+             project: :pi_bridge,
+             version: ^version,
+             build: "pi_bridge@" <> _,
+             protocol: 2,
+             transport: :stdio,
+             capabilities: capabilities
+           } = Info.snapshot(:stdio)
+
+    assert :project_eval_worker in capabilities
+    assert :attached_runtime_eval in capabilities
   end
 
   test "ready event encodes bridge info at the transport boundary" do
@@ -18,8 +27,17 @@ defmodule Pi.Bridge.InfoTest do
     ready = %Ready{type: :ready, info: Info.snapshot(:stdio)}
     encoded = Jason.encode!(Stdio.__test_payload__(ready))
 
-    assert %{"type" => "ready", "info" => %{"project" => "pi_bridge", "version" => ^version}} =
-             Jason.decode!(encoded)
+    assert %{
+             "type" => "ready",
+             "info" => %{
+               "project" => "pi_bridge",
+               "version" => ^version,
+               "protocol" => 2,
+               "capabilities" => capabilities
+             }
+           } = Jason.decode!(encoded)
+
+    assert "structured_diagnostics" in capabilities
   end
 
   test "snapshot reads isolated target project app name from mix.exs AST" do

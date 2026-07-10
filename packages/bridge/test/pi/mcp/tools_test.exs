@@ -55,6 +55,16 @@ defmodule Pi.MCP.ToolsTest do
       end
     end
 
+    test "supports explicit managed application target" do
+      assert {:ok, json} =
+               Tools.dispatch("project_eval_structured", %{
+                 "target" => "application",
+                 "code" => "Application.started_applications() |> Keyword.has_key?(:pi_bridge)"
+               })
+
+      assert %{"kind" => "eval", "result" => "true", "text" => "true"} = Jason.decode!(json)
+    end
+
     test "returns structured IO and result payload" do
       assert {:ok, json} =
                Tools.dispatch("project_eval_structured", %{
@@ -117,8 +127,8 @@ defmodule Pi.MCP.ToolsTest do
       assert {:ok, json} =
                Tools.dispatch("ex_ast_search", %{
                  "patterns" => %{
-                   "module" => "defmodule _ do _ end",
-                   "run" => "def run(_, _) do _ end"
+                   "fresh_module_review" => "defmodule _ do _ end",
+                   "fresh_run_review" => "def run(_, _) do _ end"
                  },
                  "path" => "lib/pi/eval.ex",
                  "limit" => 2,
@@ -131,7 +141,11 @@ defmodule Pi.MCP.ToolsTest do
       assert total <= 2
       assert Enum.all?(matches, &Map.has_key?(&1, "source"))
       assert Enum.all?(matches, &Map.has_key?(&1, "pattern"))
-      assert Enum.all?(matches, &(&1["pattern"] in ["module", "run"]))
+
+      assert Enum.all?(
+               matches,
+               &(&1["pattern"] in ["fresh_module_review", "fresh_run_review"])
+             )
     end
   end
 

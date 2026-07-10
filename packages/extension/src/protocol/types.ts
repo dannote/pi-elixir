@@ -23,7 +23,10 @@ export interface PendingToolCall {
 export interface BridgeInfo {
   project?: string
   version?: string
+  build?: string
+  protocol?: number
   transport?: string
+  capabilities?: string[]
   skills?: BridgeSkillInfo[]
   plugins?: BridgePluginInfo[]
   commands?: BridgePluginCommand[]
@@ -155,6 +158,7 @@ export interface JsonRpcResponse {
 
 export interface McpConfig {
   project_name: string
+  project_root?: string
   framework_type: string
 }
 

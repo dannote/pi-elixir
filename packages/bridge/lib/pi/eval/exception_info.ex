@@ -6,13 +6,20 @@ defmodule Pi.Eval.ExceptionInfo do
 
     %{
       kind: inspect(kind),
-      type: exception_type(exception),
-      message: Exception.message(exception),
+      type: exception_type(kind, exception),
+      message: exception_message(kind, exception, stacktrace),
       stacktrace: Enum.map(stacktrace, &stacktrace_entry/1)
     }
   end
 
-  defp exception_type(%module{}) when is_atom(module), do: inspect(module)
+  defp exception_type(_kind, %module{}) when is_atom(module), do: inspect(module)
+  defp exception_type(kind, _exception), do: Atom.to_string(kind)
+
+  defp exception_message(_kind, %_module{} = exception, _stacktrace),
+    do: Exception.message(exception)
+
+  defp exception_message(kind, reason, stacktrace),
+    do: Exception.format_banner(kind, reason, stacktrace)
 
   defp stacktrace_entry(entry) do
     formatted = Exception.format_stacktrace_entry(entry)

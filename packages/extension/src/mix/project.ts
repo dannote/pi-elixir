@@ -7,21 +7,6 @@ const PREFERRED_NESTED_MIX_PATHS = ['packages/bridge/mix.exs']
 const RESOLVE_CACHE_TTL_MS = 2_000
 const resolvedMixProjectCache = new Map<string, { value: string | null; timestamp: number }>()
 
-export function readMixExs(cwd: string): string | null {
-  try {
-    return fs.readFileSync(path.join(cwd, 'mix.exs'), 'utf-8')
-  } catch {
-    return null
-  }
-}
-
-export function readAppName(cwd: string): string | null {
-  const mixExs = readMixExs(cwd)
-  if (!mixExs) return null
-  const match = mixExs.match(/app:\s*:(\w+)/)
-  return match ? match[1] : null
-}
-
 export function resolveMixProjectCwd(cwd: string): string | null {
   const cached = resolvedMixProjectCache.get(cwd)
   if (cached && Date.now() - cached.timestamp < RESOLVE_CACHE_TTL_MS) {
@@ -63,16 +48,4 @@ function resolveMixProjectCwdUncached(cwd: string): string | null {
     durationMs: Date.now() - startedAt
   })
   return null
-}
-
-export function hasPiDependency(mixExs: string): boolean {
-  return /\{\s*:pi(_bridge)?\s*,/.test(mixExs)
-}
-
-export function addPiDependency(mixExs: string, dependency: string): string | null {
-  const match = mixExs.match(/defp deps do\s*\n(?<indent>\s*)\[/)
-  if (!match?.groups || match.index === undefined) return null
-  const indent = `${match.groups.indent}  `
-  const insertAt = match.index + match[0].length
-  return `${mixExs.slice(0, insertAt)}\n${indent}${dependency},${mixExs.slice(insertAt)}`
 }

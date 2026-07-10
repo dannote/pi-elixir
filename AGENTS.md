@@ -69,6 +69,10 @@ mix run --no-halt -e 'Pi.Transport.Stdio.start()'
 pnpm --dir packages/extension run test:integration
 ```
 
+## Structured data and source parsing
+
+Never parse structured source, configuration, metadata, or protocols with regular expressions. Use the canonical parser/decoder or a semantic API for Elixir AST, YAML frontmatter, JSON, versions, Mix project metadata, and wire events. If no parser exists, add a typed boundary or remove the heuristic rather than treating a regex capture as authoritative. Regular expressions remain appropriate for explicitly textual search/filter/render tasks.
+
 ## TUI renderer style
 
 When changing extension tool renderers, follow `packages/extension/docs/rendering-style.md` and compare against built-in tools. Prefer core tool colors (`toolOutput`, `muted`, `accent`, `warning`, `error`) over Markdown-only colors for metadata. Use bold mainly for call titles, keep labels muted, URLs/paths as accent, normal result text as tool output, and warnings/errors only for real warning/error states.

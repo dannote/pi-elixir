@@ -11,6 +11,7 @@ defmodule Pi.Self do
 
   alias Pi.Bridge.Info
   alias Pi.Plugin.Manager
+  alias Pi.Project.Context
   alias Pi.Quack
   alias Pi.Skill.Loader, as: SkillLoader
 
@@ -34,10 +35,19 @@ defmodule Pi.Self do
 
   @doc "Returns compact bridge environment metadata."
   def env do
+    context = Context.current()
+
     %{
-      cwd: File.cwd!(),
-      mix_project: Mix.Project.config()[:app],
-      mix_env: Mix.env(),
+      target: %{
+        cwd: context.root,
+        mix_project: Info.snapshot().project,
+        mix_env: context.mix_env
+      },
+      control: %{
+        cwd: File.cwd!(),
+        mix_project: Mix.Project.config()[:app],
+        mix_env: Mix.env()
+      },
       elixir: System.version(),
       otp: System.otp_release(),
       node: Node.self(),

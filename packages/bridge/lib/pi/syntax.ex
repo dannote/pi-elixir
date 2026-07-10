@@ -2,9 +2,6 @@ defmodule Pi.Syntax do
   @moduledoc "Syntax highlighting metadata for pi renderers."
 
   @max_highlight_bytes 100 * 1024
-  @open_tag ~r/\A\[([A-Za-z0-9_.-]+)\]/
-  @close_tag ~r/\A\[\/([A-Za-z0-9_.-]+)\]/
-
   @type span :: %{text: String.t(), scopes: [String.t()]}
   @type highlight :: %{engine: String.t(), language: String.t(), lines: [[span()]]}
 
@@ -53,52 +50,83 @@ defmodule Pi.Syntax do
   defp parse_scoped("", lines, current, scopes), do: {lines, current, scopes}
 
   defp parse_scoped(text, lines, current, scopes) do
-    cond do
-      match = Regex.run(@close_tag, text) ->
-        [tag, scope] = match
+    case scoped_tag(text) do
+      {:close, scope, rest} ->
+        parse_scoped(rest, lines, current, pop_scope(scopes, scope))
 
-        parse_scoped(
-          String.slice(text, byte_size(tag)..-1//1),
-          lines,
-          current,
-          pop_scope(scopes, scope)
-        )
+      {:open, scope, rest} ->
+        parse_scoped(rest, lines, current, [scope | scopes])
 
-      match = Regex.run(@open_tag, text) ->
-        [tag, scope] = match
-        parse_scoped(String.slice(text, byte_size(tag)..-1//1), lines, current, [scope | scopes])
-
-      String.starts_with?(text, "\n") ->
-        parse_scoped(String.slice(text, 1..-1//1), [Enum.reverse(current) | lines], [], scopes)
-
-      true ->
-        {chunk, rest} = next_text_chunk(text)
-        chunk = if chunk == "", do: String.first(text), else: chunk
-
-        rest =
-          if chunk == String.first(text) and rest == text,
-            do: String.slice(text, 1..-1//1),
-            else: rest
-
-        span = %{text: html_unescape(chunk), scopes: Enum.reverse(scopes)}
-        parse_scoped(rest, lines, [span | current], scopes)
+      :none ->
+        parse_scoped_text(text, lines, current, scopes)
     end
   end
 
-  defp next_text_chunk(text) do
-    tag_index = Regex.run(~r/\[/, text, return: :index) |> first_index()
-    newline_index = Regex.run(~r/\n/, text, return: :index) |> first_index()
+  defp parse_scoped_text("\n" <> rest, lines, current, scopes) do
+    parse_scoped(rest, [Enum.reverse(current) | lines], [], scopes)
+  end
 
+  defp parse_scoped_text(text, lines, current, scopes) do
+    {chunk, rest} = next_text_chunk(text)
+
+    {chunk, rest} =
+      if chunk == "" do
+        String.next_grapheme(text)
+      else
+        {chunk, rest}
+      end
+
+    span = %{text: html_unescape(chunk), scopes: Enum.reverse(scopes)}
+    parse_scoped(rest, lines, [span | current], scopes)
+  end
+
+  defp scoped_tag("[/" <> rest), do: finish_scoped_tag(rest, :close)
+  defp scoped_tag("[" <> rest), do: finish_scoped_tag(rest, :open)
+  defp scoped_tag(_text), do: :none
+
+  defp finish_scoped_tag(text, kind) do
+    case :binary.match(text, "]") do
+      {closing_index, 1} ->
+        scope = binary_part(text, 0, closing_index)
+
+        if valid_scope?(scope) do
+          rest = binary_part(text, closing_index + 1, byte_size(text) - closing_index - 1)
+          {kind, scope, rest}
+        else
+          :none
+        end
+
+      :nomatch ->
+        :none
+    end
+  end
+
+  defp valid_scope?(scope) when byte_size(scope) > 0 do
+    scope
+    |> :binary.bin_to_list()
+    |> Enum.all?(fn character ->
+      character in ?a..?z or character in ?A..?Z or character in ?0..?9 or
+        character in [?_, ?., ?-]
+    end)
+  end
+
+  defp valid_scope?(_scope), do: false
+
+  defp next_text_chunk(text) do
     index =
-      [tag_index, newline_index]
+      [binary_index(text, "["), binary_index(text, "\n")]
       |> Enum.reject(&is_nil/1)
       |> Enum.min(fn -> byte_size(text) end)
 
-    {String.slice(text, 0, index), String.slice(text, index..-1//1)}
+    {binary_part(text, 0, index), binary_part(text, index, byte_size(text) - index)}
   end
 
-  defp first_index([{index, _length} | _]), do: index
-  defp first_index(_), do: nil
+  defp binary_index(text, pattern) do
+    case :binary.match(text, pattern) do
+      {index, _length} -> index
+      :nomatch -> nil
+    end
+  end
 
   defp pop_scope([scope | rest], scope), do: rest
   defp pop_scope([other | rest], scope), do: [other | pop_scope(rest, scope)]
@@ -121,10 +149,29 @@ defmodule Pi.Syntax do
     |> String.replace("&amp;", "&")
     |> String.replace("&quot;", "\"")
     |> String.replace("&#39;", "'")
-    |> then(fn escaped ->
-      Regex.replace(~r/&#(\d+);/, escaped, fn _, number ->
-        number |> String.to_integer() |> List.wrap() |> List.to_string()
-      end)
-    end)
+    |> decode_numeric_entities()
+  end
+
+  defp decode_numeric_entities(text) do
+    case :binary.match(text, "&#") do
+      {entity_index, 2} ->
+        prefix = binary_part(text, 0, entity_index)
+        candidate = binary_part(text, entity_index + 2, byte_size(text) - entity_index - 2)
+        prefix <> decode_numeric_entity(candidate)
+
+      :nomatch ->
+        text
+    end
+  end
+
+  defp decode_numeric_entity(candidate) do
+    case Integer.parse(candidate) do
+      {codepoint, ";" <> rest}
+      when codepoint in 0..0xD7FF or codepoint in 0xE000..0x10FFFF ->
+        <<codepoint::utf8>> <> decode_numeric_entities(rest)
+
+      _invalid ->
+        "&#" <> decode_numeric_entities(candidate)
+    end
   end
 end

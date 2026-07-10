@@ -72,10 +72,8 @@ export function register(pi: ExtensionAPI) {
     'elixir_ast_search',
     'ex_ast_search',
     'ast grep',
-    `Search Elixir code by AST pattern using ExAST. Patterns are valid Elixir syntax.
-Variables capture matched nodes, _ is a wildcard, structs/maps match partially.
-Use either pattern for one search or patterns for multiple named searches in one traversal.
-Requires ex_ast as a project dependency.
+    `Search Elixir source by AST pattern. Prefer this over grep/regex for calls, functions, callbacks, pipelines, structs, maps, tuples, macros, and other code shapes.
+Variables capture nodes, _ is a wildcard, and structs/maps match partially. Use pattern for one search or patterns for one-pass named searches. ExAST runs in pi-elixir's isolated bridge; the target project needs no dependency.
 
 Examples:
 - 'IO.inspect(_)' — find all IO.inspect calls

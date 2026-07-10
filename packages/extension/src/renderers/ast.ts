@@ -42,31 +42,6 @@ function structuredAstMatches(payload: AstSearchPayload): AstMatch[] {
   }))
 }
 
-function parseAstMatches(text: string): AstMatch[] {
-  const lines = text.split('\n')
-  const matches: AstMatch[] = []
-
-  for (let index = 0; index < lines.length; index++) {
-    const header = lines[index].match(/^(.+?):(\d+)$/)
-    if (!header) continue
-
-    const [, path, line] = header
-    let snippet: string | undefined
-    for (let next = index + 1; next < lines.length; next++) {
-      const candidate = lines[next]
-      if (/^(.+?):(\d+)$/.test(candidate)) break
-      if (candidate.trim()) {
-        snippet = candidate.trim()
-        break
-      }
-    }
-
-    matches.push({ path, line, snippet })
-  }
-
-  return matches
-}
-
 function codeLanguage(path: string) {
   return getLanguageFromPath(path) ?? 'text'
 }
@@ -104,7 +79,7 @@ export function renderAstSearchResult(
   if (unavailableOrError) return unavailableOrError
 
   const payload = astSearchPayload(result)
-  const matches = payload ? structuredAstMatches(payload) : parseAstMatches(text)
+  const matches = payload ? structuredAstMatches(payload) : []
   if (matches.length === 0) return renderFallback(text, theme)
 
   if (!expanded) {

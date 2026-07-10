@@ -67,28 +67,6 @@ end
 ELIXIR
 }
 
-make_bridge_mix_project() {
-  local dir=$1
-  mkdir -p "$dir/lib"
-  cat > "$dir/mix.exs" <<MIX
-defmodule SetupFlow.MixProject do
-  use Mix.Project
-
-  def project do
-    [app: :setup_flow, version: "0.1.0", elixir: "~> 1.20", deps: deps()]
-  end
-
-  def application, do: [extra_applications: [:logger]]
-  defp deps, do: [{:pi_bridge, path: "$ROOT/packages/bridge", only: :dev}]
-end
-MIX
-  cat > "$dir/lib/setup_flow.ex" <<'ELIXIR'
-defmodule SetupFlow do
-  def hello, do: :world
-end
-ELIXIR
-}
-
 install_project_package() {
   local dir=$1
   log "project-local pi install in $dir"
@@ -150,27 +128,12 @@ scan_known_issues() {
 log "artifacts: $BASE"
 
 OUTSIDE="$BASE/outside"
-MISSING="$BASE/missing-dep"
+PROJECT="$BASE/dependencyless-project"
 WRONG="$BASE/wrong-elixir"
-INSTALL="$BASE/install-command"
 READY="$ROOT/packages/fixtures/demo_project"
-mkdir -p "$OUTSIDE" "$WRONG/bin" "$INSTALL/bin"
-make_minimal_mix_project "$MISSING"
-make_minimal_mix_project "$INSTALL"
-make_bridge_mix_project "$WRONG"
-cat > "$INSTALL/bin/mix" <<'FAKE_MIX_OK'
-#!/usr/bin/env bash
-if [[ "${1:-}" == "--version" ]]; then
-  echo 'Mix 1.20.1 (compiled with Erlang/OTP 29)'
-  exit 0
-fi
-if [[ "${1:-}" == "deps.get" ]]; then
-  exit 0
-fi
-echo "unexpected mix args: $*" >&2
-exit 1
-FAKE_MIX_OK
-chmod +x "$INSTALL/bin/mix"
+mkdir -p "$OUTSIDE" "$WRONG/bin"
+make_minimal_mix_project "$PROJECT"
+make_minimal_mix_project "$WRONG"
 cat > "$WRONG/bin/elixir" <<'FAKE_ELIXIR'
 #!/usr/bin/env bash
 echo 'Erlang/OTP 28 [erts-16.0]'
@@ -191,28 +154,16 @@ FAKE_MIX
 chmod +x "$WRONG/bin/elixir" "$WRONG/bin/mix"
 
 install_project_package "$OUTSIDE"
-install_project_package "$MISSING"
+install_project_package "$PROJECT"
 install_project_package "$WRONG"
-install_project_package "$INSTALL"
 
 log "doctor outside Mix project"
 run_doctor_interactive outside "$OUTSIDE"
 scan_known_issues outside "$LAST_PANE" || true
 
-log "doctor Mix project missing pi_bridge dependency"
-run_doctor_interactive missing "$MISSING"
-scan_known_issues missing "$LAST_PANE" || true
-
-log "explicit install command"
-ORIGINAL_PATH="$PATH"
-PATH="$INSTALL/bin:$PATH" run_command_interactive install-command "$INSTALL" '/elixir:install'
-PATH="$ORIGINAL_PATH"
-if rg -q 'pi_bridge' "$INSTALL/mix.exs"; then
-  echo "install command added pi_bridge dependency"
-else
-  echo "install command did not add pi_bridge dependency"
-fi
-scan_known_issues install-command "$LAST_PANE" || true
+log "doctor dependencyless Mix project"
+run_doctor_interactive dependencyless "$PROJECT"
+scan_known_issues dependencyless "$LAST_PANE" || true
 
 log "doctor wrong Elixir version"
 ORIGINAL_PATH="$PATH"

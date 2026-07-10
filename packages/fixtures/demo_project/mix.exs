@@ -15,9 +15,5 @@ defmodule PiDemoProject.MixProject do
     [extra_applications: [:logger]]
   end
 
-  defp deps do
-    [
-      {:pi_bridge, path: "../../bridge", only: [:dev, :test]}
-    ]
-  end
+  defp deps, do: []
 end

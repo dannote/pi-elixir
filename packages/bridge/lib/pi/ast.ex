@@ -1,6 +1,7 @@
 defmodule Pi.AST do
   @moduledoc "Structured ExAST helpers for bridge tools."
 
+  alias Pi.Project.Context
   alias Pi.Protocol.Tool.AST.Diff
   alias Pi.Protocol.Tool.AST.Match
   alias Pi.Protocol.Tool.AST.Replace
@@ -10,6 +11,18 @@ defmodule Pi.AST do
   alias Pi.Protocol.UI.Display
 
   @missing_ex_ast "ex_ast is not installed. Add {:ex_ast, \"~> 0.1\", only: [:dev, :test], runtime: false} to mix.exs"
+  @pattern_slots ~w(
+    pi_ast_pattern_01 pi_ast_pattern_02 pi_ast_pattern_03 pi_ast_pattern_04 pi_ast_pattern_05
+    pi_ast_pattern_06 pi_ast_pattern_07 pi_ast_pattern_08 pi_ast_pattern_09 pi_ast_pattern_10
+    pi_ast_pattern_11 pi_ast_pattern_12 pi_ast_pattern_13 pi_ast_pattern_14 pi_ast_pattern_15
+    pi_ast_pattern_16 pi_ast_pattern_17 pi_ast_pattern_18 pi_ast_pattern_19 pi_ast_pattern_20
+    pi_ast_pattern_21 pi_ast_pattern_22 pi_ast_pattern_23 pi_ast_pattern_24 pi_ast_pattern_25
+    pi_ast_pattern_26 pi_ast_pattern_27 pi_ast_pattern_28 pi_ast_pattern_29 pi_ast_pattern_30
+    pi_ast_pattern_31 pi_ast_pattern_32 pi_ast_pattern_33 pi_ast_pattern_34 pi_ast_pattern_35
+    pi_ast_pattern_36 pi_ast_pattern_37 pi_ast_pattern_38 pi_ast_pattern_39 pi_ast_pattern_40
+    pi_ast_pattern_41 pi_ast_pattern_42 pi_ast_pattern_43 pi_ast_pattern_44 pi_ast_pattern_45
+    pi_ast_pattern_46 pi_ast_pattern_47 pi_ast_pattern_48 pi_ast_pattern_49 pi_ast_pattern_50
+  )a
 
   def search(pattern, opts \\ []) when is_binary(pattern) do
     with :ok <- ensure_ex_ast() do
@@ -36,12 +49,12 @@ defmodule Pi.AST do
     with :ok <- ensure_ex_ast() do
       path = Keyword.get(opts, :path)
       paths = paths(path)
-      named_patterns = normalize_named_patterns(patterns)
+      {named_patterns, pattern_labels} = normalize_named_patterns(patterns)
 
       matches =
         paths
         |> ex_ast_search_many(named_patterns, search_opts(opts))
-        |> Enum.map(&match_payload/1)
+        |> Enum.map(&match_payload(&1, pattern_labels))
 
       {:ok,
        %Search{
@@ -111,28 +124,52 @@ defmodule Pi.AST do
   end
 
   defp normalize_named_patterns(patterns) when is_map(patterns) and map_size(patterns) <= 50 do
-    Map.new(patterns, fn {name, pattern} -> {pattern_name(name), pattern} end)
+    patterns
+    |> Enum.sort_by(fn {name, _pattern} -> to_string(name) end)
+    |> Enum.zip(@pattern_slots)
+    |> Enum.reduce({[], %{}}, fn {{name, pattern}, slot}, {slots, labels} ->
+      label = pattern_name(name)
+      {[{slot, pattern} | slots], Map.put(labels, slot, label)}
+    end)
+    |> then(fn {slots, labels} -> {Enum.reverse(slots), labels} end)
   end
 
   defp normalize_named_patterns(patterns) when is_map(patterns) do
     raise ArgumentError, "expected at most 50 named AST patterns"
   end
 
-  defp normalize_named_patterns(patterns) when is_list(patterns), do: patterns
+  defp normalize_named_patterns(patterns) when is_list(patterns) do
+    normalize_named_patterns(Map.new(patterns))
+  end
 
-  defp pattern_name(name) when is_atom(name), do: name
+  defp pattern_name(name) when is_atom(name), do: Atom.to_string(name)
 
   defp pattern_name(name) when is_binary(name) and byte_size(name) <= 64 do
-    if String.match?(name, ~r/^[A-Za-z_][A-Za-z0-9_]*$/u) do
-      String.to_existing_atom(name)
+    if identifier_like?(name) do
+      name
     else
       raise ArgumentError, "expected named AST pattern keys to be identifier-like strings"
     end
   end
 
   defp pattern_name(_name) do
-    raise ArgumentError,
-          "expected named AST pattern keys to be atoms or existing atom-name strings"
+    raise ArgumentError, "expected named AST pattern keys to be atoms or identifier-like strings"
+  end
+
+  defp identifier_like?(<<?_, rest::binary>>), do: identifier_rest?(rest)
+
+  defp identifier_like?(<<first, rest::binary>>) when first in ?A..?Z or first in ?a..?z,
+    do: identifier_rest?(rest)
+
+  defp identifier_like?(_name), do: false
+
+  defp identifier_rest?(rest) do
+    rest
+    |> :binary.bin_to_list()
+    |> Enum.all?(fn
+      ?_ -> true
+      character -> character in ?A..?Z or character in ?a..?z or character in ?0..?9
+    end)
   end
 
   defp search_opts(opts) do
@@ -146,18 +183,22 @@ defmodule Pi.AST do
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
-  defp match_payload(%{file: file, line: line, source: source} = match) do
+  defp match_payload(match, pattern_labels \\ %{})
+
+  defp match_payload(%{file: file, line: line, source: source} = match, pattern_labels) do
     %Match{
       file: file,
       line: line,
       source: source,
-      pattern: match_pattern(match),
+      pattern: match_pattern(match, pattern_labels),
       captures: match |> Map.get(:captures, %{}) |> render_captures()
     }
   end
 
-  defp match_pattern(%{pattern: pattern}), do: to_string(pattern)
-  defp match_pattern(_match), do: nil
+  defp match_pattern(%{pattern: pattern}, pattern_labels),
+    do: Map.get(pattern_labels, pattern, to_string(pattern))
+
+  defp match_pattern(_match, _pattern_labels), do: nil
 
   defp search_display(matches) do
     %Display{
@@ -412,8 +453,11 @@ defmodule Pi.AST do
   end
 
   defp read_worktree_file(path) do
+    context = Context.current()
+    resolved = Context.resolve(context, path)
+
     cond do
-      File.exists?(path) -> File.read!(path)
+      File.exists?(resolved) -> File.read!(resolved)
       root = git_root() -> root |> Path.join(path) |> maybe_read_file()
       true -> nil
     end
@@ -424,7 +468,9 @@ defmodule Pi.AST do
   end
 
   defp git_root do
-    case System.cmd("git", ["rev-parse", "--show-toplevel"], stderr_to_stdout: true) do
+    context = Context.current()
+
+    case Context.command(context, "git", ["rev-parse", "--show-toplevel"], stderr_to_stdout: true) do
       {output, 0} -> String.trim(output)
       _ -> nil
     end
@@ -433,7 +479,7 @@ defmodule Pi.AST do
   end
 
   defp git_lines(args) do
-    case System.cmd("git", args, stderr_to_stdout: true) do
+    case Context.command(Context.current(), "git", args, stderr_to_stdout: true) do
       {output, 0} -> String.split(output, "\n", trim: true)
       _ -> []
     end
@@ -442,7 +488,10 @@ defmodule Pi.AST do
   end
 
   defp git_tracked_path(path) do
-    case System.cmd("git", ["ls-files", "--full-name", "--", path], stderr_to_stdout: true) do
+    context = Context.current()
+    args = ["ls-files", "--full-name", "--", Context.relative(context, path)]
+
+    case Context.command(context, "git", args, stderr_to_stdout: true) do
       {output, 0} -> output |> String.split("\n", trim: true) |> List.first()
       _ -> nil
     end
@@ -451,7 +500,7 @@ defmodule Pi.AST do
   end
 
   defp git_show(revision) do
-    case System.cmd("git", ["show", revision], stderr_to_stdout: true) do
+    case Context.command(Context.current(), "git", ["show", revision], stderr_to_stdout: true) do
       {output, 0} -> output
       _ -> nil
     end
@@ -525,8 +574,12 @@ defmodule Pi.AST do
     if Code.ensure_loaded?(ExAST), do: :ok, else: {:error, @missing_ex_ast}
   end
 
-  defp paths(path) when is_binary(path), do: [path]
-  defp paths(_path), do: ["lib/"]
+  defp paths(path) when is_binary(path) do
+    context = Context.current()
+    [if(context.source == :cwd, do: path, else: Context.resolve(context, path))]
+  end
+
+  defp paths(_path), do: paths("lib/")
 
   defp render_captures(captures) when map_size(captures) == 0, do: %{}
 

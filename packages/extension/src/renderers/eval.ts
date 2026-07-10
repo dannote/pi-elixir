@@ -68,9 +68,14 @@ function bridgeDetails(result: AgentToolResult<unknown>): BridgeDetails | null {
 
 function errorTitle(text: string) {
   const first = firstContentLine(text)
-  const match = first.match(/^\*\* \(([^)]+)\)\s*(.*)$/)
-  if (!match) return first || 'Error'
-  const [, kind, message] = match
+  const prefix = '** ('
+  if (!first.startsWith(prefix)) return first || 'Error'
+
+  const separator = first.indexOf(') ', prefix.length)
+  if (separator < 0) return first
+
+  const kind = first.slice(prefix.length, separator)
+  const message = first.slice(separator + 2)
   return message ? `${kind}: ${message}` : kind
 }
 
@@ -95,10 +100,12 @@ function exceptionTitle(exception: ExceptionPayload | null | undefined, fallback
 }
 
 function exceptionFrames(exception: ExceptionPayload | null | undefined, fallbackText: string) {
+  const primaryOrigin = exceptionOrigin(exception)
   const structured = exception?.stacktrace
-    ?.map((frame) => frame.text?.trim())
+    ?.filter((frame) => frame.origin !== primaryOrigin)
+    .map((frame) => frame.text?.trim())
     .filter((line): line is string => Boolean(line))
-  return structured?.length ? structured.slice(0, 8) : stackFrames(fallbackText)
+  return exception?.stacktrace ? (structured ?? []).slice(0, 8) : stackFrames(fallbackText)
 }
 
 function exceptionOrigin(exception: ExceptionPayload | null | undefined): string | undefined {
@@ -110,16 +117,6 @@ function errorHeadline(title: string, origin: string | undefined) {
   return origin ? `${title} · ${origin}` : title
 }
 
-function frameOriginForText(frame: string): string | undefined {
-  const nofile = frame.match(/^nofile:(\d+)/)
-  if (nofile) return `nofile:${nofile[1]}`
-
-  const source = frame.match(/(?:^|\))\s*([^\s()]+\.(?:ex|exs|erl)):(\d+)/)
-  if (source) return `${source[1]}:${source[2]}`
-
-  return undefined
-}
-
 function renderErrorBlock(
   message: string,
   expanded: boolean,
@@ -129,9 +126,7 @@ function renderErrorBlock(
   const title = exceptionTitle(exception, errorTitle(message))
   const origin = exceptionOrigin(exception)
   const headline = errorHeadline(title, origin)
-  const frames = exceptionFrames(exception, message).filter(
-    (frame) => frameOriginForText(frame) !== origin
-  )
+  const frames = exceptionFrames(exception, message)
 
   if (!expanded) {
     const hidden = frames.length > 0 || compactText(message) !== compactText(title)

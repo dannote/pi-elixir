@@ -17,28 +17,28 @@ function commandExists(command: string): boolean {
 }
 
 export function detectElixirVersion(cwd = process.cwd()): ElixirVersion | null {
-  const result = childProcess.spawnSync('elixir', ['--version'], {
+  const result = childProcess.spawnSync('elixir', ['--eval', 'IO.write(System.version())'], {
     cwd,
     encoding: 'utf8',
     timeout: 3_000
   })
 
-  if (result.status !== 0) return null
+  if (result.status !== 0 || typeof result.stdout !== 'string') return null
 
-  const output = [result.stdout, result.stderr]
-    .filter((value): value is string => typeof value === 'string')
-    .join('\n')
-  const raw = output
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.startsWith('Elixir '))
-  const match = raw?.match(/^Elixir\s+(\d+)\.(\d+)(?:\.(\d+))?/)
-  if (!raw || !match) return null
+  const raw = result.stdout.trim()
+  const core = raw.split('-', 1)[0].split('+', 1)[0]
+  const parts = core.split('.').map(Number)
+  if (
+    (parts.length !== 2 && parts.length !== 3) ||
+    parts.some((part) => !Number.isInteger(part) || part < 0)
+  ) {
+    return null
+  }
 
   return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: match[3] ? Number(match[3]) : null,
+    major: parts[0],
+    minor: parts[1],
+    patch: parts[2] ?? null,
     raw
   }
 }

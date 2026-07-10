@@ -36,6 +36,34 @@ raise "boom"|)
     assert is_binary(origin)
   end
 
+  test "structured eval preserves non-exception exits without masking them" do
+    assert {:error, payload} =
+             Eval.run_structured("exit({:noproc, {DBConnection.Holder, :checkout, []}})")
+
+    assert payload.exception.kind == ":exit"
+    assert payload.exception.type == "exit"
+    assert payload.exception.message =~ "no process"
+    refute payload.text =~ "Pi.Eval.ExceptionInfo"
+  end
+
+  test "structured eval preserves thrown terms" do
+    assert {:error, payload} = Eval.run_structured("throw({:review, 42})")
+
+    assert payload.exception.kind == ":throw"
+    assert payload.exception.type == "throw"
+    assert payload.exception.message =~ "{:review, 42}"
+  end
+
+  test "structured eval includes compiler diagnostics" do
+    assert {:error, payload} = Eval.run_structured("pi_elixir_missing_variable")
+
+    assert [%{severity: :error, message: message, position: position}] = payload.diagnostics
+    assert message =~ "undefined variable"
+    assert is_integer(position)
+    assert payload.text =~ "Diagnostics:"
+    assert payload.text =~ "pi_elixir_missing_variable"
+  end
+
   test "structured eval includes compact inspect previews" do
     assert {:ok, payload} = Eval.run_structured("%{bridge: \"0.6.0\", app: :pi_bridge}")
 

@@ -27,6 +27,11 @@ import {
   onStatusChange,
   stopAllEmbedded
 } from '#src/beam-client.js'
+import {
+  BRIDGE_PROTOCOL_VERSION,
+  EXPECTED_BRIDGE_BUILD,
+  REQUIRED_BRIDGE_CAPABILITIES
+} from '#src/version.ts'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -42,6 +47,24 @@ function invalidResponse(text: string, status = 200): Response {
 function emitStdout(proc: childProcess.ChildProcess, text: string): void {
   const stdout = proc.stdout as EventEmitter
   stdout.emit('data', Buffer.from(text))
+}
+
+function emitReady(proc: childProcess.ChildProcess, info: Record<string, unknown> = {}): void {
+  emitStdout(
+    proc,
+    JSON.stringify({
+      type: 'ready',
+      info: {
+        project: 'test_app',
+        version: 'test',
+        build: EXPECTED_BRIDGE_BUILD,
+        protocol: BRIDGE_PROTOCOL_VERSION,
+        transport: 'stdio',
+        capabilities: [...REQUIRED_BRIDGE_CAPABILITIES],
+        ...info
+      }
+    }) + '\n'
+  )
 }
 
 // Reset module-level state between tests by clearing internal Maps/Sets.
@@ -387,27 +410,33 @@ end`)
     const first = await resolveUrl('/ready-project')
     expect(first).toBeNull()
 
-    // Simulate readiness
-    emitStdout(fakeProc, 'PI_MCP_READY port=4041 server=bandit')
+    // Simulate the strict startup handshake.
+    emitReady(fakeProc)
 
     // Second call should find the ready embedded process
     const second = await resolveUrl('/ready-project')
     expect(second).not.toBeNull()
     expect(second!.kind).toBe('embedded')
-    expect(second!.url).toContain('/mcp')
+    expect(second!.url).toBe('stdio:%2Fready-project')
   })
 
-  it('matches external MCP server by app name from mix.exs', async () => {
-    vi.mocked(fs.readFileSync).mockReturnValue('  app: :specific_app,')
-
+  it('matches external MCP server by structured project root', async () => {
     vi.mocked(fetch).mockImplementation(async (input) => {
       const url =
         typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
       if (url === 'http://localhost:4002/config') {
-        return jsonResponse({ project_name: 'wrong_app', framework_type: 'phoenix' })
+        return jsonResponse({
+          project_name: 'wrong_app',
+          project_root: '/another-project',
+          framework_type: 'phoenix'
+        })
       }
       if (url === 'http://localhost:4005/config') {
-        return jsonResponse({ project_name: 'specific_app', framework_type: 'phoenix' })
+        return jsonResponse({
+          project_name: 'specific_app',
+          project_root: '/matched-project',
+          framework_type: 'phoenix'
+        })
       }
       return new Response(null, { status: 404 })
     })
@@ -416,14 +445,16 @@ end`)
     expect(result).toEqual({ url: 'http://localhost:4005/mcp', kind: 'external' })
   })
 
-  it('returns null when external MCP servers exist but none match the app name', async () => {
-    vi.mocked(fs.readFileSync).mockReturnValue('  app: :my_app,')
-
+  it('returns null when external MCP servers report a different project root', async () => {
     vi.mocked(fetch).mockImplementation(async (input) => {
       const url =
         typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
       if (url === 'http://localhost:4000/config') {
-        return jsonResponse({ project_name: 'other_app', framework_type: 'phoenix' })
+        return jsonResponse({
+          project_name: 'other_app',
+          project_root: '/another-project',
+          framework_type: 'phoenix'
+        })
       }
       return new Response(null, { status: 404 })
     })
@@ -488,7 +519,7 @@ describe('getConnectionKind', () => {
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc)
 
     await resolveUrl('/embedded-kind-project')
-    emitStdout(fakeProc, 'PI_MCP_READY')
+    emitReady(fakeProc)
 
     expect(getConnectionKind('/embedded-kind-project')).toBe('embedded')
   })
@@ -559,7 +590,7 @@ describe('onStatusChange', () => {
     vi.mocked(childProcess.spawn).mockReturnValue(fakeProc)
 
     await resolveUrl('/cb-project')
-    emitStdout(fakeProc, 'PI_MCP_READY')
+    emitReady(fakeProc)
 
     expect(cb).toHaveBeenCalledWith('/cb-project', 'embedded')
     unsubscribe()
@@ -634,7 +665,7 @@ describe('onStatusChange', () => {
     await resolveUrl('/isolated-cb-project')
 
     expect(() => {
-      emitStdout(fakeProc, 'PI_MCP_READY')
+      emitReady(fakeProc)
     }).not.toThrow()
 
     expect(throwing).toHaveBeenCalledWith('/isolated-cb-project', 'embedded')
@@ -664,10 +695,10 @@ describe('onStatusChange', () => {
     vi.mocked(childProcess.spawn).mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc)
 
     await resolveUrl('/cached-stop-project')
-    emitStdout(firstProc, 'PI_MCP_READY port=3333')
+    emitReady(firstProc)
 
     const cached = await resolveUrl('/cached-stop-project')
-    expect(cached).toEqual({ url: 'http://127.0.0.1:3333/mcp', kind: 'embedded' })
+    expect(cached).toEqual({ url: 'stdio:%2Fcached-stop-project', kind: 'embedded' })
 
     stopAllEmbedded()
     vi.mocked(childProcess.spawn).mockClear()
@@ -703,26 +734,26 @@ describe('onStatusChange', () => {
     await resolveUrl('/restart-project')
     stopAllEmbedded()
     await resolveUrl('/restart-project')
-    emitStdout(firstProc, 'PI_MCP_READY port=3333')
+    emitReady(firstProc)
     firstProc.emit('exit')
 
     expect(getConnectionKind('/restart-project')).toBe('starting')
     expect(cb).not.toHaveBeenCalled()
 
-    emitStdout(secondProc, 'PI_MCP_READY port=4444')
+    emitReady(secondProc)
 
     expect(getConnectionKind('/restart-project')).toBe('embedded')
     expect(await resolveUrl('/restart-project')).toEqual({
-      url: 'http://127.0.0.1:4444/mcp',
+      url: 'stdio:%2Frestart-project',
       kind: 'embedded'
     })
 
     vi.mocked(fetch).mockClear()
     vi.mocked(childProcess.spawn).mockClear()
-    emitStdout(firstProc, 'PI_MCP_READY port=3333')
+    emitReady(firstProc)
 
     expect(await resolveUrl('/restart-project')).toEqual({
-      url: 'http://127.0.0.1:4444/mcp',
+      url: 'stdio:%2Frestart-project',
       kind: 'embedded'
     })
     expect(fetch).not.toHaveBeenCalled()
@@ -760,7 +791,7 @@ describe('onStatusChange', () => {
     stopAllEmbedded()
     await resolveUrl('/stale-error-project')
     firstProc.emit('error', new Error('stale process error'))
-    emitStdout(secondProc, 'PI_MCP_READY port=5555')
+    emitReady(secondProc)
 
     expect(getConnectionKind('/stale-error-project')).toBe('embedded')
     expect(cb).not.toHaveBeenCalledWith('/stale-error-project', null)
@@ -773,7 +804,7 @@ describe('onStatusChange', () => {
     unsubscribe()
   })
 
-  it('reports incompatible pi_bridge versions instead of marking embedded ready', async () => {
+  it('atomically restarts a stale bridge once before reporting incompatibility', async () => {
     const cb = vi.fn()
     const unsubscribe = onStatusChange(cb)
 
@@ -782,25 +813,34 @@ describe('onStatusChange', () => {
       throw new Error('ENOENT')
     })
 
-    const fakeProc = new EventEmitter() as childProcess.ChildProcess
-    fakeProc.stdout = new EventEmitter() as any
-    fakeProc.stderr = new EventEmitter() as any
-    fakeProc.kill = vi.fn()
-    fakeProc.pid = 24680
-    vi.mocked(childProcess.spawn).mockReturnValue(fakeProc)
+    const firstProc = new EventEmitter() as childProcess.ChildProcess
+    firstProc.stdout = new EventEmitter() as any
+    firstProc.stderr = new EventEmitter() as any
+    firstProc.kill = vi.fn()
+    firstProc.pid = 24680
+
+    const secondProc = new EventEmitter() as childProcess.ChildProcess
+    secondProc.stdout = new EventEmitter() as any
+    secondProc.stderr = new EventEmitter() as any
+    secondProc.kill = vi.fn()
+    secondProc.pid = 24681
+
+    vi.mocked(childProcess.spawn).mockClear()
+    vi.mocked(childProcess.spawn).mockReturnValueOnce(firstProc).mockReturnValueOnce(secondProc)
 
     await resolveUrl('/old-bridge-project')
-    emitStdout(
-      fakeProc,
-      JSON.stringify({
-        type: 'ready',
-        info: { project: 'old_app', version: '0.5.2', transport: 'stdio' }
-      }) + '\n'
-    )
+    emitReady(firstProc, { build: 'pi_bridge@stale/protocol-1', protocol: 1 })
 
+    expect(firstProc.kill).toHaveBeenCalled()
+    expect(childProcess.spawn).toHaveBeenCalledTimes(2)
+    expect(getConnectionKind('/old-bridge-project')).toBe('starting')
+    expect(cb).not.toHaveBeenCalledWith('/old-bridge-project', 'incompatible')
+
+    emitReady(secondProc, { build: 'pi_bridge@stale/protocol-1', protocol: 1 })
+
+    expect(secondProc.kill).toHaveBeenCalled()
     expect(getConnectionKind('/old-bridge-project')).toBe('incompatible')
     expect(cb).toHaveBeenCalledWith('/old-bridge-project', 'incompatible')
-    expect(fakeProc.kill).toHaveBeenCalled()
     unsubscribe()
   })
 
@@ -824,7 +864,7 @@ describe('onStatusChange', () => {
 
     await resolveUrl('/multi-cb-project')
     unsubscribeFirst()
-    emitStdout(fakeProc, 'PI_MCP_READY')
+    emitReady(fakeProc)
 
     expect(first).not.toHaveBeenCalled()
     expect(second).toHaveBeenCalledWith('/multi-cb-project', 'embedded')

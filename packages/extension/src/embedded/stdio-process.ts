@@ -4,12 +4,12 @@ import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
-  clearIncompatibleDependency,
+  clearIncompatibleBridge,
   clearUnavailable,
   connectionCache,
   emitStatusChange,
   invalidateCache,
-  markIncompatibleDependency,
+  markIncompatibleBridge,
   markUnavailable
 } from '#src/connection/status.ts'
 import { recordDiagnostic, withDiagnosticSpan } from '#src/diagnostics.ts'
@@ -24,7 +24,7 @@ import type {
   ToolArgs,
   ToolResult
 } from '#src/protocol/types.ts'
-import { isPiBridgeVersionCompatible, piBridgeVersionMismatchMessage } from '#src/version.ts'
+import { bridgeHandshakeProblem } from '#src/version.ts'
 
 const START_STDIO_EXPR = 'Pi.Transport.Stdio.start()'
 const BUNDLED_BRIDGE_CWD = fileURLToPath(new URL('../../../bridge', import.meta.url))
@@ -46,6 +46,7 @@ interface EmbeddedProcess {
   stderrBytes: number
   stderrPreview: string[]
   startupOutputPreview: string[]
+  restartAttempts: number
 }
 
 export type { BridgeInfo, BridgeUIEvent }
@@ -159,7 +160,7 @@ function markReady(cwd: string, entry: EmbeddedProcess, url?: string): void {
     stderrBytes: entry.stderrBytes,
     stderrPreview: entry.stderrPreview.join('\n')
   })
-  clearIncompatibleDependency(cwd)
+  clearIncompatibleBridge(cwd)
   clearUnavailable(cwd)
   invalidateCache(cwd)
   emitStatusChange(cwd, 'embedded')
@@ -241,21 +242,33 @@ async function handleBridgeRequest(
 
 function handleMessage(cwd: string, entry: EmbeddedProcess, message: StdioMessage): void {
   if (message.type === 'ready') {
-    if (message.info && !isPiBridgeVersionCompatible(message.info.version)) {
-      const error = piBridgeVersionMismatchMessage(message.info.version)
-      bridgeInfo.set(cwd, message.info)
-      markIncompatibleDependency(cwd, error)
+    const info = message.info
+    const problem = bridgeHandshakeProblem(info)
+    if (problem) {
+      if (info) bridgeInfo.set(cwd, info)
+
+      if (entry.restartAttempts === 0) {
+        recordDiagnostic('embedded_stale_restart', cwd, { error: problem })
+        stopEmbedded(cwd)
+        startEmbeddedInBackground(cwd, 1)
+        return
+      }
+
+      markIncompatibleBridge(cwd, problem)
       embeddedFailed.add(cwd)
       recordDiagnostic('embedded_incompatible', cwd, {
-        version: message.info.version,
-        error
+        build: info?.build,
+        protocol: info?.protocol,
+        capabilities: info?.capabilities,
+        error: problem
       })
       emitStatusChange(cwd, 'incompatible')
       stopEmbedded(cwd)
       return
     }
 
-    if (message.info) bridgeInfo.set(cwd, message.info)
+    if (!info) return
+    bridgeInfo.set(cwd, info)
     markReady(cwd, entry)
     return
   }
@@ -294,13 +307,6 @@ function appendStartupOutput(entry: EmbeddedProcess, text: string): void {
 function handleStdout(cwd: string, entry: EmbeddedProcess, chunk: Buffer): void {
   entry.buffer += chunk.toString()
 
-  if (entry.buffer.includes('PI_MCP_READY')) {
-    const port = entry.buffer.match(/port=(\d+)/)?.[1]
-    markReady(cwd, entry, port ? `http://127.0.0.1:${port}/mcp` : undefined)
-    entry.buffer = ''
-    return
-  }
-
   while (true) {
     const newline = entry.buffer.indexOf('\n')
     if (newline === -1) return
@@ -308,12 +314,6 @@ function handleStdout(cwd: string, entry: EmbeddedProcess, chunk: Buffer): void 
     const line = entry.buffer.slice(0, newline).trim()
     entry.buffer = entry.buffer.slice(newline + 1)
     if (!line) continue
-
-    if (line.includes('PI_MCP_READY')) {
-      const port = line.match(/port=(\d+)/)?.[1]
-      markReady(cwd, entry, port ? `http://127.0.0.1:${port}/mcp` : undefined)
-      continue
-    }
 
     const message = parseMessage(line)
     if (message) handleMessage(cwd, entry, message)
@@ -389,7 +389,7 @@ function unrefChildProcess(proc: childProcess.ChildProcess): void {
   unrefIfSupported(proc.stderr)
 }
 
-export function startEmbeddedInBackground(cwd: string): void {
+export function startEmbeddedInBackground(cwd: string, restartAttempts = 0): void {
   if (embeddedProcesses.has(cwd)) {
     recordDiagnostic('embedded_start_skipped', cwd, { reason: 'already_started' })
     return
@@ -444,7 +444,8 @@ export function startEmbeddedInBackground(cwd: string): void {
     startedAt: Date.now(),
     stderrBytes: 0,
     stderrPreview: [],
-    startupOutputPreview: []
+    startupOutputPreview: [],
+    restartAttempts
   }
   embeddedProcesses.set(cwd, entry)
 

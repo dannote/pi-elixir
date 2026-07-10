@@ -13,7 +13,7 @@ import {
   type ToolRenderResultOptions,
   type Theme
 } from '@earendil-works/pi-coding-agent'
-import { visibleWidth, type Component } from '@earendil-works/pi-tui'
+import { truncateToWidth, type Component } from '@earendil-works/pi-tui'
 import dedent from 'dedent'
 import type { TObject } from 'typebox'
 
@@ -21,10 +21,9 @@ import {
   callTool,
   resolveUrl,
   getConnectionKind,
-  getStartupTranscript,
-  type InstallPrompt
+  getStartupTranscript
 } from './connection/resolver.ts'
-import { getIncompatibleDependency, getUnavailableReason } from './connection/status.ts'
+import { getIncompatibleBridge, getUnavailableReason } from './connection/status.ts'
 import { resolveMixProjectCwd } from './mix/project.ts'
 import type { ToolArgs, ToolResult } from './protocol/types.ts'
 import { sleep } from './shared/async.ts'
@@ -32,8 +31,6 @@ import { parseIntegerEnv } from './shared/env.ts'
 
 export { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize }
 
-const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-const ansiStylePrefix = new RegExp(`^${String.fromCharCode(27)}\\[[0-9;]*m`, 'u')
 const DEFAULT_STARTUP_RETRY_DELAY_MS = 750
 const DEFAULT_STARTUP_WAIT_BUDGET_MS = 120_000
 const PREPARATION_NOTICE_DELAY_MS = 500
@@ -60,38 +57,9 @@ export function displaySingleLine(value: unknown) {
 
 export function truncateLine(text: string, maxWidth: number): string {
   if (maxWidth <= 0) return ''
-  if (visibleWidth(text) <= maxWidth) return text
 
-  const targetWidth = Math.max(0, maxWidth - 1)
-  let result = ''
-  let currentWidth = 0
-  let activeStyles: string[] = []
-  let index = 0
-
-  while (index < text.length) {
-    const ansi = ansiStylePrefix.exec(text.slice(index))
-    if (ansi) {
-      const code = ansi[0]
-      result += code
-      activeStyles = code === '\x1b[0m' || code === '\x1b[m' ? [] : [...activeStyles, code]
-      index += code.length
-      continue
-    }
-
-    let end = index
-    while (end < text.length && !ansiStylePrefix.test(text.slice(end))) end++
-
-    for (const segment of segmenter.segment(text.slice(index, end))) {
-      const grapheme = segment.segment
-      const graphemeWidth = visibleWidth(grapheme)
-      if (currentWidth + graphemeWidth > targetWidth) return result + activeStyles.join('') + '…'
-      result += grapheme
-      currentWidth += graphemeWidth
-    }
-    index = end
-  }
-
-  return result + activeStyles.join('') + '…'
+  const result = truncateToWidth(text, maxWidth, '…')
+  return text.includes('\x1b') ? result : result.replaceAll('\x1b[0m', '')
 }
 
 export function renderSingleLine(text: string): Component {
@@ -162,31 +130,22 @@ export interface BridgeToolOpts {
   ) => Component
 }
 
-function missingDependencyError() {
-  return {
-    content: [
-      {
-        type: 'text' as const,
-        text: 'Pi BEAM tools are not installed in this Mix project. Run `/elixir:install` to add the dev-only dependency, or retry from a non-interactive session where pi-elixir can install it automatically.'
-      }
-    ],
-    isError: true,
-    details: {}
-  }
+function bridgeErrorDetails(kind: string) {
+  return { bridge: { error: true, kind } }
 }
 
-function incompatibleDependencyError(cwd: string) {
+function incompatibleBridgeError(cwd: string) {
   return {
     content: [
       {
         type: 'text' as const,
         text:
-          getIncompatibleDependency(cwd) ??
-          'Installed pi_bridge version is incompatible with this pi-elixir extension.'
+          getIncompatibleBridge(cwd) ??
+          'The bundled pi_bridge does not satisfy this extension runtime contract.'
       }
     ],
     isError: true,
-    details: {}
+    details: bridgeErrorDetails('incompatible')
   }
 }
 
@@ -208,7 +167,7 @@ function noMixProjectError() {
       }
     ],
     isError: true,
-    details: {}
+    details: bridgeErrorDetails('no_mix_project')
   }
 }
 
@@ -223,7 +182,7 @@ function runtimeUnavailableError(cwd: string) {
       }
     ],
     isError: true,
-    details: {}
+    details: bridgeErrorDetails('runtime_unavailable')
   }
 }
 
@@ -246,7 +205,7 @@ function noConnectionError() {
       }
     ],
     isError: true,
-    details: {}
+    details: bridgeErrorDetails('no_connection')
   }
 }
 
@@ -282,34 +241,16 @@ function stillCompilingError() {
       }
     ],
     isError: true,
-    details: {}
+    details: bridgeErrorDetails('starting')
   }
 }
 
 function connectionError(cwd: string) {
   const kind = getConnectionKind(cwd)
   if (kind === 'starting') return stillCompilingError()
-  if (kind === 'missing') return missingDependencyError()
   if (kind === 'unavailable') return runtimeUnavailableError(cwd)
-  if (kind === 'incompatible') return incompatibleDependencyError(cwd)
+  if (kind === 'incompatible') return incompatibleBridgeError(cwd)
   return noConnectionError()
-}
-
-function installPromptMessage(prompt: InstallPrompt) {
-  return dedent`
-    Pi BEAM tools are not installed in this Mix project.
-
-    I can add the dev-only Pi BEAM dependency to ${prompt.mixExsPath} and run mix deps.get.
-
-    Proposed dependency:
-      ${prompt.dependency}
-
-    Proceed?
-  `
-}
-
-function allowNonInteractiveInstall(): boolean {
-  return process.env.PI_ELIXIR_AUTO_INSTALL !== '0'
 }
 
 type ExecuteToolCall = (
@@ -447,18 +388,16 @@ function bridgePreparationMessage(target: BeamToolTarget): string {
 
 async function resolveUrlWithStartupGrace(
   beamCwd: string,
-  confirmInstall: (prompt: InstallPrompt) => Promise<boolean>,
   onProgress?: (message: string) => void,
   signal?: AbortSignal
 ) {
-  const options = { confirmInstall, onProgress, signal }
   const startedAt = Date.now()
   const waitBudget = startupWaitBudgetMs()
   const retryDelay = startupRetryDelayMs()
 
   while (true) {
     // eslint-disable-next-line no-await-in-loop -- startup grace retries must observe sequential connection state.
-    const conn = await resolveUrl(beamCwd, options)
+    const conn = await resolveUrl(beamCwd)
     if (conn || getConnectionKind(beamCwd) !== 'starting') return conn
 
     const transcript = getStartupTranscript(beamCwd)
@@ -481,7 +420,7 @@ function registerBeamTool(pi: ExtensionAPI, tool: BeamToolRegistration) {
       if (!target) return noMixProjectError()
 
       const beamCwd = target.cwd
-      let installTranscript = ''
+      let startupTranscript = ''
       let preparationNoticeShown = false
       const preparationTimer = onUpdate
         ? setTimeout(() => {
@@ -497,13 +436,9 @@ function registerBeamTool(pi: ExtensionAPI, tool: BeamToolRegistration) {
       try {
         const conn = await resolveUrlWithStartupGrace(
           beamCwd,
-          (prompt) =>
-            ctx.hasUI
-              ? ctx.ui.confirm('Install Pi BEAM tools?', installPromptMessage(prompt))
-              : Promise.resolve(allowNonInteractiveInstall()),
           (message) => {
             if (message) {
-              installTranscript = message
+              startupTranscript = message
               if (preparationTimer && !preparationNoticeShown) clearTimeout(preparationTimer)
               onUpdate?.({
                 content: [{ type: 'text' as const, text: message }],
@@ -515,14 +450,14 @@ function registerBeamTool(pi: ExtensionAPI, tool: BeamToolRegistration) {
         )
         if (!conn) {
           const error = connectionError(beamCwd)
-          if (!installTranscript) return error
+          if (!startupTranscript) return error
 
           return {
             ...error,
             content: [
               {
                 type: 'text' as const,
-                text: `${installTranscript}\n\n${error.content.map((part) => part.text).join('\n')}`
+                text: `${startupTranscript}\n\n${error.content.map((part) => part.text).join('\n')}`
               }
             ]
           }

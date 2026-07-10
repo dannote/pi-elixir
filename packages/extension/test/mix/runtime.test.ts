@@ -44,13 +44,18 @@ describe('elixirRuntimeProblem', () => {
   it('detects Elixir versions for startup recommendations', () => {
     vi.mocked(childProcess.spawnSync).mockReturnValue({
       status: 0,
-      stdout: 'Erlang/OTP 27 [erts-15.0]\nElixir 1.19.3\n',
+      stdout: '1.19.3',
       stderr: ''
     } as childProcess.SpawnSyncReturns<Buffer>)
 
     const version = detectElixirVersion('/tmp/project')
 
-    expect(version).toMatchObject({ major: 1, minor: 19, patch: 3, raw: 'Elixir 1.19.3' })
+    expect(version).toMatchObject({ major: 1, minor: 19, patch: 3, raw: '1.19.3' })
+    expect(childProcess.spawnSync).toHaveBeenCalledWith(
+      'elixir',
+      ['--eval', 'IO.write(System.version())'],
+      expect.objectContaining({ cwd: '/tmp/project' })
+    )
     expect(shouldRecommendElixir120(version)).toBe(true)
   })
 

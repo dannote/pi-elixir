@@ -1,6 +1,6 @@
 {
   "name": "pi-elixir",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "BEAM runtime tools for pi — connects to the running Elixir app for live introspection",
   "keywords": [
     "pi-package"
@@ -43,9 +43,9 @@
     "ci": "pnpm run check",
     "hex:check": "cd packages/bridge && mix hex.build --unpack --output /tmp/pi_bridge_hex_check >/dev/null && rm -rf /tmp/pi_bridge_hex_check",
     "pack:check": "node scripts/check-pack.ts && pnpm pack --dry-run --json > /dev/null",
-    "dogfood": "pi --extension ./packages/extension/src/index.ts",
+    "dogfood": "pi --no-extensions --extension ./packages/extension/src/index.ts",
     "dogfood:install": "pi install .",
-    "dogfood:smoke": "PI_OFFLINE=1 pi --no-context-files --no-session --extension ./packages/extension/src/index.ts --tools elixir_eval --print 'Use elixir_eval to return Application.spec(:pi_bridge, :vsn) |> to_string().'"
+    "dogfood:smoke": "PI_OFFLINE=1 pi --no-extensions --no-context-files --no-session --extension ./packages/extension/src/index.ts --tools elixir_eval --print 'Use elixir_eval with target bridge to return Application.spec(:pi_bridge, :vsn) |> to_string().'"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "*",

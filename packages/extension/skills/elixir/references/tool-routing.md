@@ -2,7 +2,7 @@
 
 ## Eval first for BEAM/runtime and docs questions
 
-`elixir_eval` runs inside the project VM with project modules, dependencies, application config, IEx helpers, docs chunks, and runtime state available.
+`elixir_eval` defaults to a persistent dependencyless project VM with project modules, dependencies, config, IEx helpers, and docs chunks available, but without starting the application. Choose `target: "application"` for intentional managed startup, `target: "runtime"` to attach to `PI_ELIXIR_NODE` and inspect existing process/ETS state, or `target: "bridge"` for pi-elixir helper APIs.
 
 For installed Elixir modules, look up docs through BEAM APIs before guessing or web-searching. Use IEx helpers for quick interactive docs, and use the minimal `Pi.Docs` wrappers only when you need structured data to filter/map with normal `Enum`:
 

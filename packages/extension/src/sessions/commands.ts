@@ -4,8 +4,15 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 function sessionId(args: unknown) {
   if (typeof args === 'string') {
     const trimmed = args.trim()
-    const match = /^id\s*=\s*(\S+)$/u.exec(trimmed)
-    return match?.[1] ?? trimmed
+    const [key, value, ...extra] = trimmed.split('=')
+    const id = value?.trim()
+    const validAssignment =
+      key?.trim() === 'id' &&
+      extra.length === 0 &&
+      id !== undefined &&
+      id.length > 0 &&
+      !Array.from(id).some((character) => character.trim() === '')
+    return validAssignment ? id : trimmed
   }
 
   if (

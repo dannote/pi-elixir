@@ -21,6 +21,13 @@ function parsePluginHookResponse(text: string): PluginHookResponse {
   }
 }
 
+function bridgePayloadHasError(details: unknown): boolean {
+  if (typeof details !== 'object' || details === null) return false
+  const bridge = (details as { bridge?: unknown }).bridge
+  if (typeof bridge !== 'object' || bridge === null) return false
+  return (bridge as { error?: unknown }).error === true
+}
+
 function evalPayloadHasError(details: unknown): boolean {
   if (typeof details !== 'object' || details === null) return false
   const payload = (details as { eval?: unknown }).eval
@@ -85,8 +92,12 @@ export function registerBridgeToolHooks(
     const beamCwd = resolveElixirCwd(ctx.cwd)
     if (!beamCwd) return undefined
 
+    // pi-agent-core initializes extension tool executions as non-errors and relies on this
+    // post-tool hook to promote domain errors returned as structured tool results.
     const evalError = event.toolName === 'elixir_eval' && evalPayloadHasError(event.details)
-    const isError = event.isError || evalError
+    const bridgeError =
+      event.toolName?.startsWith('elixir_') && bridgePayloadHasError(event.details)
+    const isError = event.isError || evalError || bridgeError
 
     recordDiagnostic('tool_result', beamCwd, { toolName: event.toolName, isError })
     if (event.toolName?.startsWith('elixir_'))

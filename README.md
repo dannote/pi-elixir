@@ -2,12 +2,13 @@
 
 `pi-elixir` is the pi extension for BEAM-native, verifiable Elixir development.
 
-It connects pi to the running Elixir system so an agent can inspect runtime state, make syntax-aware Elixir edits, and verify changes with real project checks. The model-facing surface stays intentionally small: eval for runtime truth, ExAST tools for structural code work, and normal Mix/LSP/shell commands for everything else.
+It gives pi an isolated BEAM control plane plus explicit project, application, and attached-runtime eval modes, so an agent can inspect runtime state, make syntax-aware Elixir edits, and verify changes with real project checks. The model-facing surface stays intentionally small: eval for runtime truth, ExAST tools for structural code work, and normal Mix/LSP/shell commands for everything else.
 
 ## What it gives pi
 
-- **Live BEAM eval** — `elixir_eval` runs trusted Elixir inside the loaded app with project modules, deps, config, processes, ETS, logs, and IEx helpers available.
-- **Stateful IEx-like cells** — bindings, aliases, imports, and requires persist across eval calls and resume/branch navigation via sidecar snapshots.
+- **Persistent project eval** — `elixir_eval` defaults to a dependencyless target-project VM that keeps bindings while avoiding application startup side effects.
+- **Explicit runtime modes** — opt into managed application startup or attach to an existing distributed BEAM node to inspect live processes and ETS state.
+- **Stateful IEx-like cells** — bindings, aliases, imports, and requires persist per pi execution path via sidecar snapshots; failed compilation/eval keeps the last good state.
 - **Structural Elixir tools** — `elixir_ast_search` and `elixir_ast_replace` use [ExAST](https://hex.pm/packages/ex_ast) patterns instead of text/regex matching.
 - **Syntax-aware review orientation** — `AST.diff(changed: true)` / `CodeMap.reflect(changed: true)` summarize changed modules/functions before the agent reads a large `git diff`.
 - **OTP-backed sessions and agents** — optional BEAM sessions/subagents render as compact pi session trees without spawning more pi processes.
@@ -34,25 +35,13 @@ Use full diagnostics when setup looks wrong:
 /elixir:doctor
 ```
 
-In each Mix project that should use BEAM tools, install the dev-only bridge dependency:
-
-```text
-/elixir:install
-```
-
-That adds an exact-versioned dependency such as:
-
-```elixir
-{:pi_bridge, "== <pi-elixir-version>", only: :dev}
-```
-
-The exact version matters: npm `pi-elixir` and Hex `pi_bridge` are released together and must speak the same protocol. If you skip `/elixir:install`, the first Elixir tool call can still prompt to add the dependency.
+No project dependency or `mix.exs` edit is required. The extension starts its bundled `pi_bridge` in an isolated control VM and starts a separate dependencyless worker for the target Mix project. Startup validates a strict build/protocol/capability handshake.
 
 ## Daily workflow
 
-### Inspect the running app
+### Inspect project code or a running app
 
-Use `iex` / `elixir_eval` when runtime truth matters:
+Default eval uses the persistent project VM without starting the application:
 
 ```text
 iex alias MyApp.Repo; alias MyApp.Billing.Invoice; stale = Repo.all(...); length(stale)
@@ -72,13 +61,14 @@ iex stale |> Enum.group_by(& &1.customer_id) |> Enum.map(fn {id, xs} -> {id, len
 Took 0.1s
 ```
 
-For Phoenix/Ecto/OTP bugs, prefer asking the running system over guessing from files:
+Use `target: "application"` when application startup is intentional. Use `target: "runtime"` with `PI_ELIXIR_NODE` (and the matching distributed-node cookie) to inspect an already-running node without starting a second copy. Bridge helper APIs such as `AST`, `CodeMap`, `Self`, `Q`, and `Docs` use `target: "bridge"`.
+
+For Phoenix/Ecto/OTP bugs, prefer asking the intended runtime over guessing from files:
 
 ```elixir
 Supervisor.which_children(MyApp.Supervisor)
 Application.get_env(:my_app, MyApp.Repo)
 Process.info(pid, [:status, :message_queue_len, :current_stacktrace])
-Pi.logs(tail: 50)
 ```
 
 ### Search and edit by syntax
@@ -109,7 +99,7 @@ Then inspect only the relevant source slices or `git diff` sections. This keeps 
 
 | Tool | Label | Purpose |
 |---|---:|---|
-| `elixir_eval` | `iex` | Trusted eval inside the running app. Stateful by default for pi session branches; sandbox mode is available for untrusted snippets. |
+| `elixir_eval` | `iex` | Trusted eval in `project` (default), `application`, attached `runtime`, or isolated `bridge` mode. Stateful by default for pi session branches; sandbox mode is available for untrusted snippets. |
 | `elixir_ast_search` | `ast grep` | ExAST structural search over Elixir code. |
 | `elixir_ast_replace` | `ast edit` | ExAST structural rewrite with dry-run diffs. |
 
@@ -163,15 +153,17 @@ Physical storage:
 
 Unsafe or oversized bindings are handled defensively: PIDs/ports/refs/functions are not persisted, containers containing them are skipped, and sidecar snapshots have a size budget.
 
-## Connection model
+## Connection and runtime model
 
-The normal path is an embedded stdio bridge started inside the Mix project with `Pi.Transport.Stdio.start()`. HTTP MCP endpoints are advanced/debug escape hatches.
+The normal path is an embedded stdio control bridge started from the extension's bundled `packages/bridge` project. It does not load `pi_bridge` into the target project. HTTP MCP endpoints remain advanced/debug escape hatches.
 
 Resolution order:
 
 1. `PI_MCP_URL`, only when explicitly configured for a manually exposed HTTP MCP endpoint.
 2. Discovered local HTTP MCP endpoint matching the Mix app name.
-3. Embedded stdio transport inside the project.
+3. Bundled embedded stdio control bridge, with `PI_ELIXIR_PROJECT_CWD` identifying the target project.
+
+The control bridge then routes eval to one of four strict targets: dependencyless persistent `project`, managed `application`, attached distributed `runtime`, or `bridge`. Ready state is accepted only when build, protocol, and required capabilities match; one stale child is replaced atomically before an incompatibility is reported.
 
 ```sh
 # Advanced/debug only: bypass embedded stdio and use your own HTTP MCP endpoint.
@@ -179,7 +171,7 @@ export PI_MCP_URL=http://localhost:4001/mcp
 export PI_DISABLE_EMBEDDED=1
 ```
 
-Status is transport-focused and actionable: external/embedded/starting/missing/incompatible/offline. It does **not** show project package versions or optional integration guesses; project-specific checks belong in explicit eval snippets, prompts, and skills.
+Status distinguishes the control bridge from the target project and reports external/embedded/starting/incompatible/unavailable state plus the negotiated runtime contract. Project-specific checks belong in explicit eval snippets, prompts, and skills.
 
 Feature flags are escape hatches for noisy, sensitive, or experimental environments:
 
@@ -217,18 +209,18 @@ cd my_lib
 pi install npm:pi-elixir
 ```
 
-VibeKit provides the project quality baseline (`mix ci`, Credo strict with ExSlop, Dialyzer, ExDNA, and Reach). pi-elixir provides the live BEAM tools used by agents while they work inside that project. Run `/elixir:install` once per project to add the exact matching dev-only `:pi_bridge` dependency.
+VibeKit provides the project quality baseline (`mix ci`, Credo strict with ExSlop, Dialyzer, ExDNA, and Reach). pi-elixir provides the BEAM tools used by agents while they work inside that project, without adding `pi_bridge` to project dependencies.
 
 ## Troubleshooting setup
 
 | Symptom | What to do |
 |---|---|
-| `Mix cwd: not found` | Start pi from a Mix project directory, or from a supported repo root with a known nested Mix project. |
+| `target Mix cwd: not found` | Start pi from a Mix project directory, or from a supported repo root with a known nested Mix project. |
 | `Elixir is not installed or not available on PATH` | Start pi from a shell where Elixir/Mix are available. If you just changed `mise`/`asdf` versions, restart pi. |
 | Stale `mise` PATH warning | Restart the shell/pi process so removed tool install paths disappear from `PATH`. |
-| `pi_bridge dependency: missing` | Run `/elixir:install` in the Mix project. |
-| Embedded BEAM exited before ready | Fix the Mix/Elixir error shown in doctor, then run `/elixir:restart`. Wrong Elixir versions surface here as the real Mix error. |
-| `pi_bridge version mismatch` | Update the Mix dependency to the exact version expected by installed `pi-elixir`, then run `mix deps.get`. |
+| Embedded BEAM exited before ready | Fix the bundled bridge Mix/Elixir error shown in doctor, then run `/elixir:restart`. |
+| Bridge build/protocol/capability mismatch | Run `/elixir:restart`; if it remains, update or reinstall `pi-elixir`. Do not edit the target project's dependencies. |
+| Attached runtime cannot connect | Set `PI_ELIXIR_NODE` to the existing distributed node and start pi with a compatible node name/cookie. |
 | Tool registration conflicts with another `pi-elixir` path | Remove the duplicate install, usually `pi remove npm:pi-elixir`, then install only the checkout or only the npm package. |
 
 ## Local development

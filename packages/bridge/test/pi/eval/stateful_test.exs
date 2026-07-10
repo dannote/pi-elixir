@@ -94,6 +94,27 @@ defmodule Pi.Eval.StatefulTest do
     assert payload.text == "1"
   end
 
+  test "stateful eval keeps exit reasons and compiler diagnostics", %{state_path: state_path} do
+    assert {:error, exit_payload} =
+             Eval.run_structured("exit({:noproc, {:checkout, []}})",
+               session_id: "leaf",
+               state_path: state_path
+             )
+
+    assert exit_payload.exception.type == "exit"
+    assert exit_payload.exception.message =~ "noproc"
+
+    assert {:error, compile_payload} =
+             Eval.run_structured("stateful_missing_variable",
+               session_id: "leaf",
+               state_path: state_path
+             )
+
+    assert [%{severity: :error, message: message}] = compile_payload.diagnostics
+    assert message =~ "undefined variable"
+    assert compile_payload.text =~ "stateful_missing_variable"
+  end
+
   test "reset and forget are available from inside eval", %{state_path: state_path} do
     assert {:ok, _payload} =
              Eval.run_structured("x = 1; y = 2", session_id: "leaf", state_path: state_path)

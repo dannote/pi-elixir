@@ -4,17 +4,11 @@ BEAM runtime bridge for [pi](https://github.com/earendil-works/pi-coding-agent) 
 
 `pi_bridge` is inspired by [Vibe](https://github.com/elixir-vibe/vibe): keep the model-facing surface small, but let trusted Elixir code operate from inside the running BEAM.
 
-## Installation
+## Installation and runtime boundary
 
-```elixir
-def deps do
-  [
-    {:pi_bridge, "== 0.6.21", only: :dev}
-  ]
-end
-```
+Users install the npm `pi-elixir` package; it bundles this Mix project and runs it as an isolated control VM. Target projects do **not** add `:pi_bridge` to `mix.exs`. The control bridge identifies the target with `PI_ELIXIR_PROJECT_CWD`, negotiates a build/protocol/capability handshake with the extension, and starts dependencyless project/application workers as needed.
 
-`pi_bridge` is intended for development-time agent tooling. The dependency is exact-versioned because the npm extension and Hex bridge are released together and share a stdio protocol.
+The Hex package remains published for bridge development and protocol consumers, but installing it into each target project is no longer the pi-elixir runtime path.
 
 ## Public API ergonomics
 
@@ -36,9 +30,14 @@ Boundary JSON examples are documented in [`docs/protocol.md`](docs/protocol.md).
 
 ## Eval
 
-`Pi.Eval.run/2` is the trusted project introspection path. It evaluates inside the project BEAM with project modules, aliases, application config, OTP processes, Repo modules, and IEx helpers available.
+`elixir_eval` has four explicit trusted targets:
 
-Structured eval from the pi tool is stateful: bindings and `Macro.Env` are kept in a supervised evaluator and persisted as sidecar snapshots next to the pi session. That gives IEx/Livebook-like continuity across eval calls and resume/branch navigation without inlining large state into JSONL transcripts.
+- `project` (default): persistent dependencyless target VM; project modules/deps/config are available, but the application is not started;
+- `application`: managed target VM with the target application intentionally started;
+- `runtime`: attached distributed node configured by `PI_ELIXIR_NODE`, for observing existing PIDs/ETS/application state;
+- `bridge`: isolated control VM for `Pi.*`, `AST`, `CodeMap`, `Self`, `Q`, and `Docs` helpers.
+
+Structured eval is stateful per pi execution path: bindings and `Macro.Env` are persisted as sidecar snapshots next to the pi session. Failed eval or compilation preserves the last good state/code. This gives IEx/Livebook-like continuity across calls and resume/branch navigation without inlining large state into JSONL transcripts.
 
 Useful eval helpers:
 

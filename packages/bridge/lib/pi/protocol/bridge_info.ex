@@ -11,7 +11,10 @@ defmodule Pi.Protocol.BridgeInfo do
   defstruct [
     :project,
     :version,
+    :build,
+    :protocol,
     :transport,
+    capabilities: [],
     skills: [],
     plugins: [],
     commands: [],
@@ -21,7 +24,10 @@ defmodule Pi.Protocol.BridgeInfo do
   @type t :: %__MODULE__{
           project: atom() | nil,
           version: String.t() | nil,
+          build: String.t(),
+          protocol: pos_integer(),
           transport: atom() | nil,
+          capabilities: [atom()],
           skills: [SkillInfo.t()],
           plugins: [PluginInfo.t()],
           commands: [PluginCommand.t()],

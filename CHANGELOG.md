@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-07-10
+
+### Added
+
+- Added a persistent dependencyless target-project VM with authenticated loopback transport, per-session stateful eval, sidecar restoration, timeout cancellation, independent restart, and strict capability/bootstrap validation.
+- Added explicit eval targets for dependencyless project code, managed application startup, attached distributed runtimes (`PI_ELIXIR_NODE`), and isolated bridge helpers.
+- Added structured eval diagnostics for compiler/runtime failures and preserved last-good bindings, compiled artifacts, and loaded BEAM code after failed edits.
+- Added bounded arbitrary labels for named AST searches without creating user-controlled runtime atoms.
+- Added explicit target-project context for CodeMap, AST, plugin, skill, git, and filesystem operations.
+- Added bridge ready build/protocol/capability negotiation with one atomic stale-child replacement before incompatibility is reported.
+
+### Changed
+
+- The bundled bridge is now always the isolated control plane; target projects no longer need `pi_bridge` in `mix.exs`.
+- QuackDB mirror ownership now runs through a serialized lifecycle with supervised sync tasks, explicit readiness, deterministic shutdown, concurrent startup safety, and real non-skipped tests. Updated `quackdb` to 0.5.15 and bound its local endpoint explicitly to `127.0.0.1`.
+- Status, doctor output, protocol docs, skills, and READMEs now distinguish the control bridge, project worker, managed application, and attached runtime.
+- Skills now use flat standard names (`elixir`, `elixir-web`, and `elixir-new-project`) with mutually exclusive scopes and thin entry points that lazily route to focused references. Model guidance routes runtime/docs work to eval and code-shape/refactor work to AST tools first, without a false target-project `ex_ast` dependency requirement.
+- Eval target/mode JSON strings are decoded once by `JSONCodec` into canonical enum atoms; internal dispatch no longer accepts duplicate string representations.
+- Skill/package validation now uses pi's canonical skill loader and Mix runtime metadata instead of regular-expression parsing of YAML frontmatter or Elixir source. HTML extraction now uses Floki's document parser, and structured renderer/protocol paths consume their typed payloads directly.
+
+### Fixed
+
+- Eval exception formatting no longer masks `throw` or non-exception `exit` reasons such as `:noproc` with a secondary `FunctionClauseError`.
+- Project-aware helpers no longer accidentally resolve paths or git operations against the bundled bridge working directory.
+- External HTTP bridge discovery matches structured `project_root` identity instead of extracting `app:` from `mix.exs` with a regular expression.
+- Project-local plugins and executable skills are discovered from the explicit target root while the control bridge remains isolated.
+- `CodeMap.smells(path: ...)` now normalizes Reach `location` fields into file/line data, removes leading colons from kinds, and prioritizes high-impact/high-confidence findings before applying the default limit.
+- Compact project/application/runtime eval renders a bounded one-line inspect preview instead of the first pretty-printed token such as `%{`.
+- Cold-start, unavailable, and incompatible bridge failures now persist as real tool errors instead of being downgraded by pi-agent-core's extension-tool result lifecycle.
+- QuackDB startup no longer advertises a `localhost` endpoint that has no listening socket, and failed schema startup now cleans up partially started resources.
+
+### Removed
+
+- Removed `/elixir:install`, automatic `mix.exs` mutation, project dependency prompts, installer rollback/network paths, and the legacy fixture dependency on `pi_bridge`.
+- Removed legacy stdio readiness-marker fallback; embedded startup now requires the structured ready handshake.
+
 ## 0.7.1 - 2026-07-07
 
 ### Fixed

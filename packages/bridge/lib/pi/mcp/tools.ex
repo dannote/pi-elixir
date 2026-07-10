@@ -3,10 +3,12 @@ defmodule Pi.MCP.Tools do
 
   require Pi.Features
 
+  alias Pi.ProjectEval
   alias Pi.Protocol.Tool.AST.ReplaceRequest
   alias Pi.Protocol.Tool.AST.SearchRequest
   alias Pi.Protocol.Tool.EvalRequest
   alias Pi.Protocol.Tool.OutputPart
+  alias Pi.Target.Attached
 
   def dispatch("project_eval", %{"mode" => "sandbox"} = args), do: eval(args, structured?: false)
   def dispatch("project_eval", args), do: eval(args, structured?: false)
@@ -104,31 +106,39 @@ defmodule Pi.MCP.Tools do
     code |> Pi.Eval.sandbox(timeout: timeout) |> sandbox_result()
   end
 
-  defp run_eval(%EvalRequest{target: target, code: code} = request, timeout, true)
-       when target in [:project, "project"] do
-    if Pi.ProjectEval.available?() do
-      code |> Pi.ProjectEval.run_structured(eval_opts(request, timeout)) |> encode_result()
-    else
-      code |> Pi.Eval.run_structured(eval_opts(request, timeout)) |> encode_result()
-    end
+  defp run_eval(%EvalRequest{target: :project, code: code} = request, timeout, true) do
+    ProjectEval.run_structured(code, eval_opts(request, timeout)) |> encode_result()
   end
 
-  defp run_eval(%EvalRequest{target: target, code: code} = request, timeout, false)
-       when target in [:project, "project"] do
-    if Pi.ProjectEval.available?() do
-      Pi.ProjectEval.run(code, eval_opts(request, timeout))
-    else
-      Pi.Eval.run(code, eval_opts(request, timeout))
-    end
+  defp run_eval(%EvalRequest{target: :project, code: code} = request, timeout, false) do
+    ProjectEval.run(code, eval_opts(request, timeout))
   end
 
-  defp run_eval(%EvalRequest{target: target, code: code} = request, timeout, true)
-       when target in [:bridge, "bridge"] do
+  defp run_eval(%EvalRequest{target: :application, code: code} = request, timeout, true) do
+    opts = request |> eval_opts(timeout) |> Keyword.put(:profile, :application)
+    ProjectEval.run_structured(code, opts) |> encode_result()
+  end
+
+  defp run_eval(%EvalRequest{target: :application, code: code} = request, timeout, false) do
+    opts = request |> eval_opts(timeout) |> Keyword.put(:profile, :application)
+    ProjectEval.run(code, opts)
+  end
+
+  defp run_eval(%EvalRequest{target: :runtime, code: code} = request, timeout, true) do
+    code
+    |> Attached.run_structured(eval_opts(request, timeout))
+    |> encode_result()
+  end
+
+  defp run_eval(%EvalRequest{target: :runtime, code: code} = request, timeout, false) do
+    Attached.run(code, eval_opts(request, timeout))
+  end
+
+  defp run_eval(%EvalRequest{target: :bridge, code: code} = request, timeout, true) do
     code |> Pi.Eval.run_structured(eval_opts(request, timeout)) |> encode_result()
   end
 
-  defp run_eval(%EvalRequest{target: target, code: code} = request, timeout, false)
-       when target in [:bridge, "bridge"] do
+  defp run_eval(%EvalRequest{target: :bridge, code: code} = request, timeout, false) do
     Pi.Eval.run(code, eval_opts(request, timeout))
   end
 

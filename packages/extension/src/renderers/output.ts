@@ -177,10 +177,29 @@ function renderMarkdownTable(
   }
 }
 
+function isAsciiLetter(character: string) {
+  return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z')
+}
+
+function bareAtomName(label: string): string | undefined {
+  if (!label.startsWith(':')) return undefined
+
+  const name = label.slice(1)
+  const [first, ...rest] = Array.from(name)
+  const validFirst = first !== undefined && (first === '_' || isAsciiLetter(first))
+  const validRest = rest.every(
+    (character) =>
+      isAsciiLetter(character) ||
+      (character >= '0' && character <= '9') ||
+      ['_', '?', '!', '@'].includes(character)
+  )
+  return validFirst && validRest ? name : undefined
+}
+
 function treeKeyLabel(key: unknown) {
   const label = tableCell(key)
-  const atom = label.match(/^:([A-Za-z_][\w?!@]*)$/u)
-  if (atom) return atom[1]
+  const atom = bareAtomName(label)
+  if (atom) return atom
   if (label.startsWith('"') && label.endsWith('"')) return decodeInspectedString(label)
   return label
 }
@@ -276,10 +295,19 @@ function highlightPayload(part: OutputPart): HighlightPayload | null {
 
 const rainbowThemeKeys = ['syntaxType', 'syntaxNumber', 'syntaxFunction', 'syntaxOperator'] as const
 
+function rainbowSuffix(scope: string): string | undefined {
+  if (scope.startsWith('rainbow-')) return scope.slice('rainbow-'.length)
+  if (scope.startsWith('rainbow.')) return scope.slice('rainbow.'.length)
+  return undefined
+}
+
 function rainbowIndex(scopes: string[]): number | undefined {
   for (const scope of scopes) {
-    const match = scope.match(/rainbow[-.](\d+)/u)
-    if (match) return Number.parseInt(match[1] ?? '1', 10) - 1
+    const suffix = rainbowSuffix(scope)
+    if (suffix === undefined) continue
+
+    const index = Number(suffix)
+    if (Number.isInteger(index) && index > 0) return index - 1
   }
   return undefined
 }
@@ -611,7 +639,10 @@ function compactHighlightedPreview(part: OutputPart, theme: Theme): string | nul
 }
 
 function compactPartPreview(part: OutputPart, index: number, theme: Theme) {
-  const text = compactHighlightedPreview(part, theme) ?? partPreview(part)
+  const text =
+    part.kind === 'inspect'
+      ? partPreview(part)
+      : (compactHighlightedPreview(part, theme) ?? partPreview(part))
   const styled = part.kind === 'text' && index === 0 ? theme.fg('toolOutput', text) : text
   return index === 0 ? styled : theme.fg('muted', ` ↳ ${text}`)
 }

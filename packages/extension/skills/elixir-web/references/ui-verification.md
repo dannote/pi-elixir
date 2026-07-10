@@ -59,7 +59,7 @@ Use this to answer “why is my class missing?” with the actual extracted or m
 
 ## Rendered HTML checks
 
-Do not use `phoenix_vapor` for this workflow yet. Its published dependency graph currently pulls QuickBEAM compiler internals, which are experimental and not part of the stable webdev verification path.
+Do not add `phoenix_vapor` for this workflow unless the user explicitly requests it and its current capabilities are required.
 
 Plain Phoenix projects can use their existing view/component render helpers from eval or `Phoenix.LiveViewTest` in tests. Prefer exact HTML fragments or assigns over screenshots.
 
@@ -67,14 +67,7 @@ Plain Phoenix projects can use their existing view/component render helpers from
 
 Use `phoenix_test_playwright` when the user needs an actual browser: JavaScript behavior, cross-browser checks, traces, screenshots, iframe/email flows, or browser-only regressions. Do not make it the first/default verification path; prefer BEAM-native checks first (explicit `Code.ensure_loaded?/1` package checks, Volt browser logs, PhoenixReplay recordings, render/eval checks).
 
-Setup, when explicitly needed:
-
-```elixir
-# mix.exs
-{:phoenix_test_playwright, "~> 0.14", only: :test, runtime: false}
-```
-
-It also requires Playwright and browsers in `assets`:
+When explicitly needed, inspect the current package docs/metadata and add a compatible test-only `phoenix_test_playwright` dependency rather than copying a pinned version. It also requires Playwright and browsers in `assets`:
 
 ```sh
 cd assets

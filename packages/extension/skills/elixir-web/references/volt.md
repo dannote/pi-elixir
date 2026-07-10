@@ -1,6 +1,6 @@
 # Volt Workflows
 
-Use these only when `volt` is installed. Prefer projects installed with `mix igniter.install volt` on the current published line (`volt ~> 0.14`, resolving QuickBEAM `~> 0.10.15`). Verify first:
+Use these only when `volt` is installed. Install through the current `mix igniter.install volt` flow and verify loaded capabilities instead of assuming package versions:
 
 ```elixir
 Code.ensure_loaded?(Volt)
