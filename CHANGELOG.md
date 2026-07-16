@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.3 - 2026-07-10
+
+### Fixed
+
+- Compact eval previews are truncated as plain text before syntax highlighting so they remain one line without ANSI resets breaking the tool-card background.
+
 ## 0.8.2 - 2026-07-10
 
 ### Added

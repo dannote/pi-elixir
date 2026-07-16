@@ -418,20 +418,47 @@ function renderOnlyTreePart(visibleParts: OutputPart[], expanded: boolean, theme
   return renderCompactTreePart(onlyPart, theme)
 }
 
+function highlightedInspectPreview(part: OutputPart, preview: string) {
+  return highlightCode(preview, part.language ?? 'elixir')[0] ?? preview
+}
+
+function renderOnlyInspectPart(visibleParts: OutputPart[], expanded: boolean, theme: Theme) {
+  const part = visibleParts.length === 1 ? visibleParts[0] : undefined
+  if (expanded || part?.kind !== 'inspect') return null
+
+  return {
+    render: (width: number) => {
+      const preview = partPreview(part)
+      const hint = inlineExpandHint(theme)
+      const semanticHidden = partHasSemanticHiddenOutput(part)
+
+      if (!semanticHidden && visibleWidth(preview) <= width)
+        return ['', highlightedInspectPreview(part, preview)]
+
+      if (semanticHidden && visibleWidth(preview + hint) <= width)
+        return ['', highlightedInspectPreview(part, preview) + hint]
+
+      const reserve = visibleWidth(hint)
+      if (width > reserve + 4) {
+        const truncated = truncateLine(preview, width - reserve)
+        return ['', highlightedInspectPreview(part, truncated) + hint]
+      }
+
+      return ['', highlightedInspectPreview(part, truncateLine(preview, width))]
+    },
+    invalidate: () => undefined
+  }
+}
+
 function compactHighlightedPreview(part: OutputPart, theme: Theme): string | null {
   const line = highlightedBodyLines(part, theme)?.[0]
   return line ?? null
 }
 
-function compactInspectPreview(part: OutputPart) {
-  const preview = partPreview(part)
-  return highlightCode(preview, part.language ?? 'elixir')[0] ?? preview
-}
-
 function compactPartPreview(part: OutputPart, index: number, theme: Theme) {
   const text =
     part.kind === 'inspect'
-      ? compactInspectPreview(part)
+      ? partPreview(part)
       : (compactHighlightedPreview(part, theme) ?? partPreview(part))
   const styled = part.kind === 'text' && index === 0 ? theme.fg('toolOutput', text) : text
   return index === 0 ? styled : theme.fg('muted', ` ↳ ${text}`)
@@ -499,6 +526,9 @@ export function renderOutputParts(parts: OutputPart[], expanded: boolean, theme:
 
   const tree = renderOnlyTreePart(visibleParts, expanded, theme)
   if (tree) return tree
+
+  const inspect = renderOnlyInspectPart(visibleParts, expanded, theme)
+  if (inspect) return inspect
 
   if (!expanded) return renderCompactOutputParts(visibleParts, theme)
 

@@ -174,6 +174,27 @@ describe('elixir result rendering', () => {
     highlightCodeOverride.mockReset()
   })
 
+  it('truncates compact inspect text before highlighting to preserve the card background', () => {
+    const title =
+      '%{manifest_entries: 93, entries: 92, files: 94, chunks: 1, imports: [{"entry.js", %{isEntry: true}}]}'
+    highlightCodeOverride.mockImplementationOnce((text: string) => [`\u001b[31m${text}\u001b[39m`])
+    const result = evalResult({
+      result: `%{\n  manifest_entries: 93,\n  entries: 92,\n  files: 94,\n  chunks: 1\n}`,
+      parts: [{ kind: 'inspect', body: title, title, language: 'elixir' }]
+    })
+
+    const lines = linesOf(
+      renderElixirResult(result, { expanded: false, isPartial: false }, theme),
+      54
+    )
+    const highlightedInput = highlightCodeOverride.mock.calls.at(-1)?.[0]
+
+    expect(lines).toHaveLength(2)
+    expect(highlightedInput).toMatch(/…$/u)
+    expect(lines[1]).not.toContain('\u001b[0m')
+    highlightCodeOverride.mockReset()
+  })
+
   it('uses the one-line inspect title instead of the first pretty-printed line', () => {
     const body =
       '%{\n  modules: 42,\n  missing_moduledoc: [:Alpha, :Beta],\n  undocumented_count: 7\n}'
