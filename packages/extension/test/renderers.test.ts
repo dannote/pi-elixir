@@ -174,13 +174,24 @@ describe('elixir result rendering', () => {
     highlightCodeOverride.mockReset()
   })
 
-  it('truncates compact inspect text before highlighting to preserve the card background', () => {
-    const title =
+  it('truncates compact tree previews before highlighting to preserve the card background', () => {
+    const preview =
       '%{manifest_entries: 93, entries: 92, files: 94, chunks: 1, imports: [{"entry.js", %{isEntry: true}}]}'
     highlightCodeOverride.mockImplementationOnce((text: string) => [`\u001b[31m${text}\u001b[39m`])
     const result = evalResult({
-      result: `%{\n  manifest_entries: 93,\n  entries: 92,\n  files: 94,\n  chunks: 1\n}`,
-      parts: [{ kind: 'inspect', body: title, title, language: 'elixir' }]
+      parts: [
+        {
+          kind: 'tree',
+          body: JSON.stringify([
+            { key: 'manifest_entries', value: '93' },
+            { key: 'entries', value: '92' },
+            { key: 'files', value: '94' },
+            { key: 'chunks', value: '1' }
+          ]),
+          title: 'map with 5 keys',
+          data: { title_kind: 'generated', inspect_preview: preview }
+        }
+      ]
     })
 
     const lines = linesOf(
@@ -503,7 +514,7 @@ describe('elixir result rendering', () => {
     expect(expanded).toContain('├─ changed_functions: []')
   })
 
-  it('renders compact tree parts with real data preview', () => {
+  it('renders compact tree parts as one highlighted data line', () => {
     const result = evalResult({
       parts: [
         {
@@ -524,13 +535,16 @@ describe('elixir result rendering', () => {
       ]
     })
 
-    const compact = textOf(renderElixirResult(result, { expanded: false, isPartial: false }, theme))
+    const component = renderElixirResult(result, { expanded: false, isPartial: false }, theme)
+    const compact = textOf(component)
 
+    expect(linesOf(component)).toHaveLength(2)
     expect(compact).not.toContain('map with 4 keys')
-    expect(compact).toContain('├─ status: 200')
-    expect(compact).toContain('├─ title: Example Domain')
-    expect(compact).toContain('└─ truncated?: false')
-    expect(compact).not.toContain('(ctrl+o to expand)')
+    expect(compact).toContain(
+      '%{status: 200, title: "Example Domain", format: :text, truncated?: false}'
+    )
+    expect(compact).not.toContain('├─')
+    expect(compact).toContain('(ctrl+o to expand)')
   })
 
   it('renders web fetch document parts as a compact card', () => {

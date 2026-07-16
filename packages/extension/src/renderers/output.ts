@@ -214,18 +214,23 @@ function treeExpandLine(hidden: number, theme: Theme) {
 }
 
 function renderCompactTreePart(part: OutputPart, theme: Theme): Component | null {
+  const inspectPreview = treeInspectPreview(part)
+  if (inspectPreview) {
+    const preview = hasGeneratedTreeTitle(part)
+      ? comparableInspectText(inspectPreview)
+      : partPreview(part)
+    return renderHighlightedCompactLine(preview, 'elixir', true, theme)
+  }
+
   const tree = renderTreePart(part, theme)
-  const inspectPreview = tree ? undefined : treeInspectPreview(part)
-  if (!tree && !inspectPreview) return null
+  if (!tree) return null
 
   return {
     render: (width) => {
       const maxLines = 6
-      const rawLines = tree ?? highlightCode(stripFinalNewline(inspectPreview ?? ''), 'elixir')
-      const shown = rawLines.slice(0, maxLines).map((line) => truncateLine(line, width))
-      const hidden = rawLines.length - shown.length
-      const title = partPreview(part)
-      const titleLines = hasGeneratedTreeTitle(part) ? [] : [truncateLine(title, width)]
+      const shown = tree.slice(0, maxLines).map((line) => truncateLine(line, width))
+      const hidden = tree.length - shown.length
+      const titleLines = hasGeneratedTreeTitle(part) ? [] : [truncateLine(partPreview(part), width)]
       const expand = treeExpandLine(hidden, theme)
       return ['', ...titleLines, ...shown, ...(expand ? [expand] : [])]
     },
@@ -418,36 +423,44 @@ function renderOnlyTreePart(visibleParts: OutputPart[], expanded: boolean, theme
   return renderCompactTreePart(onlyPart, theme)
 }
 
-function highlightedInspectPreview(part: OutputPart, preview: string) {
-  return highlightCode(preview, part.language ?? 'elixir')[0] ?? preview
+function renderHighlightedCompactLine(
+  preview: string,
+  language: string,
+  semanticHidden: boolean,
+  theme: Theme
+): Component {
+  const highlight = (text: string) => highlightCode(text, language)[0] ?? text
+
+  return {
+    render: (width: number) => {
+      const hint = inlineExpandHint(theme)
+
+      if (!semanticHidden && visibleWidth(preview) <= width) return ['', highlight(preview)]
+
+      if (semanticHidden && visibleWidth(preview + hint) <= width)
+        return ['', highlight(preview) + hint]
+
+      const reserve = visibleWidth(hint)
+      if (width > reserve + 4) {
+        const truncated = truncateLine(preview, width - reserve)
+        return ['', highlight(truncated) + hint]
+      }
+
+      return ['', highlight(truncateLine(preview, width))]
+    },
+    invalidate: () => undefined
+  }
 }
 
 function renderOnlyInspectPart(visibleParts: OutputPart[], expanded: boolean, theme: Theme) {
   const part = visibleParts.length === 1 ? visibleParts[0] : undefined
   if (expanded || part?.kind !== 'inspect') return null
-
-  return {
-    render: (width: number) => {
-      const preview = partPreview(part)
-      const hint = inlineExpandHint(theme)
-      const semanticHidden = partHasSemanticHiddenOutput(part)
-
-      if (!semanticHidden && visibleWidth(preview) <= width)
-        return ['', highlightedInspectPreview(part, preview)]
-
-      if (semanticHidden && visibleWidth(preview + hint) <= width)
-        return ['', highlightedInspectPreview(part, preview) + hint]
-
-      const reserve = visibleWidth(hint)
-      if (width > reserve + 4) {
-        const truncated = truncateLine(preview, width - reserve)
-        return ['', highlightedInspectPreview(part, truncated) + hint]
-      }
-
-      return ['', highlightedInspectPreview(part, truncateLine(preview, width))]
-    },
-    invalidate: () => undefined
-  }
+  return renderHighlightedCompactLine(
+    partPreview(part),
+    part.language ?? 'elixir',
+    partHasSemanticHiddenOutput(part),
+    theme
+  )
 }
 
 function compactHighlightedPreview(part: OutputPart, theme: Theme): string | null {

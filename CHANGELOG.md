@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.4 - 2026-07-10
+
+### Fixed
+
+- Compact map and list results render as one syntax-highlighted line again. Width truncation happens before highlighting so the ellipsis cannot reset the tool-card background.
+
 ## 0.8.3 - 2026-07-10
 
 ### Fixed
