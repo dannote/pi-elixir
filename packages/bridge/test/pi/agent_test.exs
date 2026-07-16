@@ -12,10 +12,11 @@ defmodule Pi.AgentTest do
   setup do
     if pid = Process.whereis(Pi.Agent.Manager), do: GenServer.stop(pid)
     if pid = Process.whereis(Pi.Agent.JobSupervisor), do: GenServer.stop(pid)
-    if pid = Process.whereis(Broker), do: GenServer.stop(pid)
-    if pid = Process.whereis(SessionSupervisor), do: GenServer.stop(pid)
-    :persistent_term.put({Pi.Transport.Stdio, :pid}, self())
-    on_exit(fn -> :persistent_term.erase({Pi.Transport.Stdio, :pid}) end)
+    :ok = Broker.reset()
+    :ok = SessionSupervisor.reset()
+    owner = self()
+    Pi.Transport.register(owner)
+    on_exit(fn -> Pi.Transport.unregister(owner) end)
     :ok
   end
 

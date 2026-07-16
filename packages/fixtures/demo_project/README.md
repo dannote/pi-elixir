@@ -14,5 +14,5 @@ Run manually:
 
 ```sh
 mix deps.get
-mix run --no-halt -e 'Pi.Transport.Stdio.start()'
+mix run -e 'Pi.Transport.Stdio.start()'
 ```

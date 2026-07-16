@@ -6,17 +6,14 @@ defmodule Pi.LLM.Broker do
   alias Pi.LLM.Stream, as: LLMStream
   alias Pi.Protocol.LLM.Cancel
   alias Pi.Protocol.Response
-  alias Pi.Transport.Stdio
+  alias Pi.Transport
 
   @timeout 60_000
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def install do
-    case Process.whereis(__MODULE__) do
-      nil -> start_link([])
-      _pid -> :ok
-    end
+    if Process.whereis(__MODULE__), do: :ok, else: {:error, :llm_broker_not_started}
   end
 
   def complete(messages, opts \\ []) do
@@ -28,33 +25,50 @@ defmodule Pi.LLM.Broker do
   end
 
   def request(op, payload, timeout \\ @timeout) when is_atom(op) and is_map(payload) do
-    install()
-    GenServer.call(__MODULE__, {:request, op, payload, timeout}, timeout + 1_000)
+    with :ok <- install(),
+         do: GenServer.call(__MODULE__, {:request, op, payload, timeout}, timeout + 1_000)
   end
 
   def stream(messages, opts \\ []) do
     request_stream(:llm_stream, %{messages: messages, opts: Map.new(opts)}, opts)
   end
 
-  def deliver(id, result) when is_binary(id) do
+  @doc false
+  def reset do
     install()
-    GenServer.cast(__MODULE__, {:deliver, id, result})
+    GenServer.call(__MODULE__, :reset)
+  end
+
+  def deliver(id, result) when is_binary(id) do
+    with :ok <- install(), do: GenServer.cast(__MODULE__, {:deliver, id, result})
   end
 
   def deliver_stream(id, event, payload)
       when is_binary(id) and event in [:chunk, :done, :error] do
-    install()
-    GenServer.cast(__MODULE__, {:deliver_stream, id, event, payload})
+    with :ok <- install(), do: GenServer.cast(__MODULE__, {:deliver_stream, id, event, payload})
   end
 
   @impl true
   def init(_opts), do: {:ok, %{next_id: 0, pending: %{}, streams: %{}}}
 
   @impl true
+  def handle_call(:reset, _from, state) do
+    Enum.each(state.pending, fn {_id, %{from: from, timer: timer}} ->
+      Process.cancel_timer(timer)
+      GenServer.reply(from, {:error, "Pi LLM broker reset"})
+    end)
+
+    Enum.each(state.streams, fn {id, owner} ->
+      send_stream(owner, id, :error, "Pi LLM broker reset")
+    end)
+
+    {:reply, :ok, %{next_id: 0, pending: %{}, streams: %{}}}
+  end
+
   def handle_call({:request, op, payload, timeout}, from, state) do
     id = request_id(state.next_id + 1)
     timer = Process.send_after(self(), {:timeout, id}, timeout)
-    Stdio.emit_request(id, op, payload)
+    Transport.request(id, op, payload)
 
     pending = Map.put(state.pending, id, %{from: from, timer: timer})
     {:noreply, %{state | next_id: state.next_id + 1, pending: pending}}
@@ -106,10 +120,10 @@ defmodule Pi.LLM.Broker do
   end
 
   defp request_stream(op, payload, opts) do
-    install()
+    :ok = install()
     id = request_id(System.unique_integer([:positive]))
     GenServer.call(__MODULE__, {:register_stream, id, self()})
-    Stdio.emit_request(id, op, payload)
+    Transport.request(id, op, payload)
 
     stream =
       Elixir.Stream.resource(
@@ -125,7 +139,7 @@ defmodule Pi.LLM.Broker do
               {:pi_llm_error, ^stream_id, error} -> raise RuntimeError, message: inspect(error)
             after
               Keyword.get(opts, :timeout, @timeout) ->
-                Stdio.emit(%Cancel{type: :llm_cancel, id: stream_id, reason: "timeout"})
+                Transport.emit(%Cancel{type: :llm_cancel, id: stream_id, reason: "timeout"})
                 {:halt, stream_id}
             end
         end,
@@ -135,7 +149,7 @@ defmodule Pi.LLM.Broker do
 
           stream_id ->
             GenServer.call(__MODULE__, {:unregister_stream, stream_id})
-            Stdio.emit(%Cancel{type: :llm_cancel, id: stream_id, reason: "closed"})
+            Transport.emit(%Cancel{type: :llm_cancel, id: stream_id, reason: "closed"})
         end
       )
 

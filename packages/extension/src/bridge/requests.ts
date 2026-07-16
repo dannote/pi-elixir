@@ -1,13 +1,13 @@
 import type { BridgeRequestResponder } from '#src/embedded/stdio-process.ts'
 import { flags } from '#src/flags.ts'
-import type { StdioMessage } from '#src/protocol/types.ts'
+import type { BridgeRequestMessage } from '#src/protocol/types.ts'
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 
 import { scheduleDevRequest } from './dev-reload.ts'
 import { handleLLMComplete, handleLLMStream } from './llm.ts'
 
 function handleDevReloadRequest(
-  message: StdioMessage,
+  message: BridgeRequestMessage,
   ctx: ExtensionContext,
   pi: ExtensionAPI,
   beamCwd: string
@@ -29,7 +29,7 @@ function handleDevReloadRequest(
 }
 
 export async function handleBridgeRequest(
-  message: StdioMessage,
+  message: BridgeRequestMessage,
   ctx: ExtensionContext,
   pi: ExtensionAPI,
   beamCwd: string,

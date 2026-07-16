@@ -6,9 +6,10 @@ defmodule Pi.LLM.BrokerTest do
   alias Pi.Protocol.Response
 
   setup do
-    if pid = Process.whereis(Broker), do: GenServer.stop(pid)
-    :persistent_term.put({Pi.Transport.Stdio, :pid}, self())
-    on_exit(fn -> :persistent_term.erase({Pi.Transport.Stdio, :pid}) end)
+    :ok = Broker.reset()
+    owner = self()
+    Pi.Transport.register(owner)
+    on_exit(fn -> Pi.Transport.unregister(owner) end)
     :ok
   end
 

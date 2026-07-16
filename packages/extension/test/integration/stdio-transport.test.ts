@@ -110,7 +110,7 @@ describe.skipIf(!elixirAvailable || !projectAvailable)('embedded stdio transport
   beforeAll(async () => {
     ensureDeps()
     queue = new JsonLineQueue()
-    proc = spawn('mix', ['run', '--no-halt', '-e', START_STDIO_EXPR], {
+    proc = spawn('mix', ['run', '-e', START_STDIO_EXPR], {
       cwd: BRIDGE_DIR,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
@@ -243,5 +243,17 @@ second = Task.async(fn -> Pi.LLM.complete("second") end)
     expect(result.isError).toBe(false)
     expect(result.text).toContain('first result')
     expect(result.text).toContain('second result')
+  })
+
+  it('exits cleanly when the owning process closes stdin', async () => {
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve) => {
+        proc.once('exit', (code, signal) => resolve({ code, signal }))
+      }
+    )
+
+    proc.stdin?.end()
+
+    await expect(exited).resolves.toEqual({ code: 0, signal: null })
   })
 })

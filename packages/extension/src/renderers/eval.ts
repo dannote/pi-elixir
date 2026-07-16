@@ -6,7 +6,8 @@ import type {
 import type { Component } from '@earendil-works/pi-tui'
 
 import { renderCommandOutput } from '../shared/command-output.ts'
-import { renderOutputParts, type OutputPart } from './output.ts'
+import type { OutputPart } from './output-types.ts'
+import { renderOutputParts } from './output.ts'
 import {
   codeLines,
   compactText,
@@ -180,7 +181,7 @@ function renderBridgeStatus(bridge: BridgeDetails, text: string, expanded: boole
 function isInstallTranscript(text: string) {
   return (
     text.includes('$ mix deps.get') ||
-    text.includes('$ mix run --no-halt') ||
+    text.includes("$ mix run -e '<stdio-start>'") ||
     text.startsWith('[pi-elixir] Added ')
   )
 }

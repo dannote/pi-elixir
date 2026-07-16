@@ -16,24 +16,17 @@ defmodule Pi.Transport.Stdio do
   alias Pi.Protocol.PluginHook
   alias Pi.Protocol.PluginHookResponse
   alias Pi.Protocol.Ready
-  alias Pi.Protocol.Request
   alias Pi.Protocol.Response
   alias Pi.Protocol.Result
   alias Pi.Skill.Loader
+  alias Pi.Transport
+  alias Pi.Transport.Payload
 
-  def emit_request(id, op, payload) when is_binary(id) and is_atom(op) and is_map(payload) do
-    emit(%Request{type: :request, id: id, op: op, payload: payload})
-  end
-
-  def emit(payload) when is_map(payload) do
-    case :persistent_term.get({__MODULE__, :pid}, nil) do
-      nil -> :ok
-      pid -> send(pid, {:pi_transport_emit, payload |> to_payload() |> normalize()})
-    end
-  end
+  defdelegate emit_request(id, op, payload), to: Transport, as: :request
+  defdelegate emit(payload), to: Transport
 
   @doc false
-  def __test_payload__(payload), do: payload |> to_payload() |> normalize()
+  def __test_payload__(payload), do: Payload.encode(payload)
 
   @doc false
   def __test_dispatch__(name, args), do: dispatch(name, args)
@@ -46,23 +39,32 @@ defmodule Pi.Transport.Stdio do
     safe_call("pi stdio test call failed: #{name}", fun)
   end
 
-  def start do
-    :persistent_term.put({__MODULE__, :pid}, self())
-    Event.install()
-    if Pi.Features.plugins?(), do: Manager.install()
-    Broker.install()
-    Pi.Eval.Supervisor.install()
-    ready()
+  def start(input \\ IO.stream(:stdio, :line)) do
+    Transport.register(self())
 
-    parent = self()
+    try do
+      Event.install()
+      if Pi.Features.plugins?(), do: Manager.install()
+      Broker.install()
+      Pi.Eval.Supervisor.install()
+      ready()
+      start_input_reader(input)
+      loop()
+    after
+      clear_transport_owner()
+    end
+  end
+
+  defp start_input_reader(input) do
+    owner = self()
 
     spawn_link(fn ->
-      IO.stream(:stdio, :line)
-      |> Enum.each(&send(parent, {:stdin, &1}))
+      Enum.each(input, &send(owner, {:stdin, &1}))
+      send(owner, :stdin_closed)
     end)
-
-    loop()
   end
+
+  defp clear_transport_owner, do: Transport.unregister(self())
 
   defp loop do
     receive do
@@ -73,6 +75,9 @@ defmodule Pi.Transport.Stdio do
       {:pi_transport_emit, payload} ->
         write(payload)
         loop()
+
+      :stdin_closed ->
+        :ok
     end
   end
 
@@ -101,8 +106,11 @@ defmodule Pi.Transport.Stdio do
     end
   end
 
-  defp handle_payload(%Call{} = call),
-    do: spawn(fn -> safe_respond(call.id, call.name, safe_dispatch(call)) end)
+  defp handle_payload(%Call{} = call) do
+    Task.Supervisor.start_child(Pi.Transport.TaskSupervisor, fn ->
+      safe_respond(call.id, call.name, safe_dispatch(call))
+    end)
+  end
 
   defp handle_payload(%Response{} = response), do: Broker.deliver(response.id, response)
   defp handle_payload(%Chunk{} = chunk), do: Broker.deliver_stream(chunk.id, :chunk, chunk.delta)
@@ -229,9 +237,9 @@ defmodule Pi.Transport.Stdio do
   defp encode_hook_reply(:ok), do: encode_reply(PluginHookResponse.ok())
   defp encode_hook_reply(value), do: encode_reply(value)
 
-  defp encode_reply(reply), do: {:ok, Jason.encode!(reply |> reply_payload() |> normalize())}
+  defp encode_reply(reply), do: {:ok, Jason.encode!(reply |> reply_payload() |> Payload.encode())}
 
-  defp reply_payload(%_module{} = value), do: to_payload(value)
+  defp reply_payload(%_module{} = value), do: Payload.encode(value)
   defp reply_payload({:ok, value}) when is_map(value), do: %{ok: value}
   defp reply_payload({:ok, value}) when is_binary(value), do: %{ok: value}
   defp reply_payload({:error, value}), do: %{error: value}
@@ -259,45 +267,7 @@ defmodule Pi.Transport.Stdio do
 
   defp ready, do: write(%Ready{type: :ready, info: Info.snapshot(:stdio)})
 
-  defp encode_structs(values) do
-    values
-    |> Enum.map(&to_payload/1)
-    |> Jason.encode!()
-  end
+  defp encode_structs(values), do: values |> Enum.map(&Payload.encode/1) |> Jason.encode!()
 
-  defp write(payload) do
-    IO.write([Jason.encode!(payload |> to_payload() |> normalize()), ?\n])
-  end
-
-  defp to_payload(%Result{} = result) do
-    %{
-      type: result.type,
-      id: result.id,
-      text: result.text,
-      isError: result.is_error
-    }
-  end
-
-  defp to_payload(%PluginHookResponse{} = response) do
-    response
-    |> JSONCodec.dump()
-    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
-    |> Map.new()
-  end
-
-  defp to_payload(%_module{} = struct), do: JSONCodec.dump(struct)
-
-  defp to_payload(map) when is_map(map), do: map
-
-  defp normalize(map) when is_map(map) do
-    Map.new(map, fn {key, value} -> {key, normalize_value(value)} end)
-  end
-
-  defp normalize_value(%_module{} = value), do: value |> to_payload() |> normalize()
-  defp normalize_value(value) when is_boolean(value), do: value
-  defp normalize_value(nil), do: nil
-  defp normalize_value(value) when is_atom(value), do: Atom.to_string(value)
-  defp normalize_value(value) when is_map(value), do: normalize(value)
-  defp normalize_value(value) when is_list(value), do: Enum.map(value, &normalize_value/1)
-  defp normalize_value(value), do: value
+  defp write(payload), do: IO.write([Jason.encode!(Payload.encode(payload)), ?\n])
 end

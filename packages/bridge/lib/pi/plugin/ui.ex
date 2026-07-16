@@ -2,7 +2,7 @@ defmodule Pi.Plugin.UI do
   @moduledoc "Renderer-neutral UI events emitted from BEAM plugins to pi."
 
   alias Pi.Protocol.UIEvent
-  alias Pi.Transport.Stdio
+  alias Pi.Transport
 
   def set_status(key, text) when is_atom(key) or is_binary(key) do
     emit(%UIEvent{type: :ui, op: :status, key: key, text: text})
@@ -47,5 +47,5 @@ defmodule Pi.Plugin.UI do
     })
   end
 
-  def emit(payload) when is_map(payload), do: Stdio.emit(payload)
+  def emit(payload) when is_map(payload), do: Transport.emit(payload)
 end

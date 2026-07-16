@@ -73,8 +73,16 @@ raise "boom"|)
     assert output =~ "bridge"
     assert preview == "map with 2 keys"
 
-    assert [%Pi.Protocol.Tool.OutputPart{data: %{inspect_preview: inspect_preview}}] =
-             payload.parts
+    assert [
+             %Pi.Protocol.Tool.OutputPart{
+               data: %{
+                 inspect_preview: inspect_preview,
+                 container_kind: :map,
+                 container_size: 2,
+                 title_kind: :generated
+               }
+             }
+           ] = payload.parts
 
     assert inspect_preview =~ "bridge:"
   end

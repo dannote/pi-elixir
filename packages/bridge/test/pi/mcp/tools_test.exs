@@ -172,7 +172,7 @@ defmodule Pi.MCP.ToolsTest do
       assert {:error, message} =
                Tools.dispatch("ex_ast_replace", %{
                  "pattern" => "def run_structured(_, _) do _ end",
-                 "replacement" => "def run_structured(code, opts \\ []) do :ok end",
+                 "replacement" => "def run_structured(code, opts) do :ok end",
                  "path" => "packages/bridge/lib/pi/eval.ex",
                  "dryRun" => true
                })

@@ -45,7 +45,11 @@ defmodule Pi.SelfTest do
   end
 
   defp start_mirror(_db) do
-    assert {:ok, %{enabled?: true} = state} = Mirror.init([])
+    assert {:ok, initial_state} = Mirror.init([])
+
+    assert {{:ok, _status}, %{enabled?: true} = state} =
+             Mirror.handle_command(:"quack.status", "", initial_state)
+
     {:ok, state}
   end
 

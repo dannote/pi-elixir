@@ -9,13 +9,11 @@ defmodule Pi.Mirror.QuackDB do
 
   use Pi.Plugin
 
-  alias Pi.Mirror.QuackDB.Lifecycle
+  alias Pi.Mirror.QuackDB.{Config, Lifecycle}
   alias Pi.Plugin.UI
 
   @table "pi_events"
   @files_table "pi_session_files"
-  @default_batch_size 1
-  @sync_batch_size 5_000
   @sync_progress_key :elixir_quack_sync
   @sync_supervisor Pi.Mirror.QuackDB.SyncSupervisor
   @fts_columns [
@@ -54,13 +52,7 @@ defmodule Pi.Mirror.QuackDB do
   def enabled?, do: Pi.Features.env_enabled?("PI_ELIXIR_MIRROR")
 
   @impl true
-  def init(_opts) do
-    if enabled?() do
-      start_mirror()
-    else
-      {:ok, %{enabled?: false}}
-    end
-  end
+  def init(_opts), do: {:ok, %{enabled?: false}}
 
   command(name: :quack, description: "Show QuackDB mirror status")
   command(name: :"quack.status", description: "Show QuackDB mirror status")
@@ -69,12 +61,16 @@ defmodule Pi.Mirror.QuackDB do
   command(name: :"quack.search", description: "Search mirrored pi sessions with QuackDB FTS")
 
   @impl true
-  def handle_event(event, %{enabled?: true} = state) when is_map(event) do
-    state = remember_session(state, event)
-    append(state, event_row(event, event["type"] || "event", event))
-  end
+  def handle_event(event, state) when is_map(event) do
+    state = ensure_enabled(state)
 
-  def handle_event(_event, state), do: {:noreply, state}
+    if state.enabled? do
+      state = remember_session(state, event)
+      append(state, event_row(event, event["type"] || "event", event))
+    else
+      {:noreply, state}
+    end
+  end
 
   @impl true
   def handle_command(:quack, args, state) do
@@ -125,52 +121,60 @@ defmodule Pi.Mirror.QuackDB do
   end
 
   @impl true
-  def tool_call(call, context, %{enabled?: true} = state) do
-    payload = %{"call" => call, "context" => context}
+  def tool_call(call, context, state) do
+    state = ensure_enabled(state)
 
-    state =
-      state
-      |> remember_session(context)
-      |> append_row(%{
-        event_type: "tool_call_hook",
-        cwd: context["cwd"],
-        session_file: context["sessionFile"],
-        session_name: context["sessionName"],
-        leaf_id: context["leafId"],
-        tool_name: call["toolName"],
-        tool_call_id: call["toolCallId"],
-        is_error: false,
-        payload_json: encode_payload(payload)
-      })
+    if state.enabled? do
+      payload = %{"call" => call, "context" => context}
 
-    {:ok, state}
+      state =
+        state
+        |> remember_session(context)
+        |> append_row(%{
+          event_type: "tool_call_hook",
+          cwd: context["cwd"],
+          session_file: context["sessionFile"],
+          session_name: context["sessionName"],
+          leaf_id: context["leafId"],
+          tool_name: call["toolName"],
+          tool_call_id: call["toolCallId"],
+          is_error: false,
+          payload_json: encode_payload(payload)
+        })
+
+      {:ok, state}
+    else
+      {:ok, state}
+    end
   end
-
-  def tool_call(_call, _context, state), do: {:ok, state}
 
   @impl true
-  def tool_result(result, context, %{enabled?: true} = state) do
-    payload = %{"result" => result, "context" => context}
+  def tool_result(result, context, state) do
+    state = ensure_enabled(state)
 
-    state =
-      state
-      |> remember_session(context)
-      |> append_row(%{
-        event_type: "tool_result_hook",
-        cwd: context["cwd"],
-        session_file: context["sessionFile"],
-        session_name: context["sessionName"],
-        leaf_id: context["leafId"],
-        tool_name: result["toolName"],
-        tool_call_id: result["toolCallId"],
-        is_error: result["isError"] == true,
-        payload_json: encode_payload(payload)
-      })
+    if state.enabled? do
+      payload = %{"result" => result, "context" => context}
 
-    {:ok, state}
+      state =
+        state
+        |> remember_session(context)
+        |> append_row(%{
+          event_type: "tool_result_hook",
+          cwd: context["cwd"],
+          session_file: context["sessionFile"],
+          session_name: context["sessionName"],
+          leaf_id: context["leafId"],
+          tool_name: result["toolName"],
+          tool_call_id: result["toolCallId"],
+          is_error: result["isError"] == true,
+          payload_json: encode_payload(payload)
+        })
+
+      {:ok, state}
+    else
+      {:ok, state}
+    end
   end
-
-  def tool_result(_result, _context, state), do: {:ok, state}
 
   @impl true
   def shutdown(%{enabled?: true} = state) do
@@ -205,37 +209,6 @@ defmodule Pi.Mirror.QuackDB do
     end
   end
 
-  @doc false
-  def start_mirror_resources do
-    with :ok <- ensure_quackdb(),
-         {:ok, supervisor, conn} <- start_quackdb() do
-      initialize_mirror(supervisor, conn)
-    end
-  end
-
-  defp initialize_mirror(supervisor, conn) do
-    case ensure_schema(conn) do
-      :ok ->
-        {:ok, %{supervisor: supervisor, conn: conn}}
-
-      {:error, reason} ->
-        stop_supervisor(supervisor)
-        {:error, reason}
-    end
-  catch
-    kind, reason ->
-      stacktrace = __STACKTRACE__
-      stop_supervisor(supervisor)
-      {:error, {:schema_initialization_failed, kind, reason, stacktrace}}
-  end
-
-  defp stop_supervisor(supervisor) do
-    if Process.alive?(supervisor), do: Supervisor.stop(supervisor)
-    :ok
-  catch
-    :exit, _reason -> :ok
-  end
-
   defp ensure_enabled(%{enabled?: true} = state), do: state
 
   defp ensure_enabled(state) do
@@ -251,102 +224,9 @@ defmodule Pi.Mirror.QuackDB do
     end
   end
 
-  defp ensure_quackdb do
-    case Application.ensure_all_started(:quackdb) do
-      {:ok, _apps} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp start_quackdb do
-    server_name = __MODULE__.Server
-    client_name = __MODULE__.Client
-    token = "pi_elixir_mirror_#{System.unique_integer([:positive])}"
-    port = mirror_port()
-    endpoint = "quack:127.0.0.1:#{port}"
-    uri = System.get_env("PI_ELIXIR_MIRROR_QUACKDB_URI") || "http://127.0.0.1:#{port}"
-
-    server_opts =
-      [
-        name: server_name,
-        duckdb: mirror_duckdb(),
-        database: mirror_database(),
-        endpoint: endpoint,
-        uri: uri,
-        token: mirror_token(token),
-        wait_timeout: mirror_wait_timeout(),
-        poll_interval: 25,
-        daemon_options: mirror_daemon_options()
-      ]
-      |> compact_keyword()
-
-    client_opts =
-      [
-        name: client_name,
-        uri: uri,
-        token: mirror_token(token),
-        pool_size: mirror_pool_size()
-      ]
-      |> compact_keyword()
-
-    children =
-      if System.get_env("PI_ELIXIR_MIRROR_QUACKDB_URI") do
-        [{QuackDB, client_opts}]
-      else
-        QuackDB.Server.child_specs(server: server_opts, client: client_opts)
-      end
-
-    children = children ++ [{Task.Supervisor, name: @sync_supervisor}]
-
-    case Supervisor.start_link(children, strategy: :one_for_one) do
-      {:ok, supervisor} -> {:ok, supervisor, client_name}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp ensure_schema(conn) do
-    QuackDB.query!(conn, QuackDB.DDL.create_table(@table, @columns, if_not_exists: true))
-
-    QuackDB.query!(
-      conn,
-      QuackDB.DDL.create_table(@files_table, file_columns(), if_not_exists: true)
-    )
-
-    QuackDB.query!(conn, create_session_file_index())
-
-    :ok
-  rescue
-    exception in [QuackDB.Error, DBConnection.ConnectionError, RuntimeError, ArgumentError] ->
-      {:error, exception}
-  end
-
-  defp create_session_file_index do
-    [
-      "CREATE INDEX IF NOT EXISTS ",
-      QuackDB.Type.quote_identifier("pi_events_session_entry_file_idx"),
-      " ON ",
-      QuackDB.Type.quote_identifier(@table),
-      "(",
-      QuackDB.Type.quote_identifier(:event_type),
-      ", ",
-      QuackDB.Type.quote_identifier(:session_file),
-      ")"
-    ]
-  end
-
-  defp file_columns do
-    [
-      {:session_file, :varchar, primary_key: true},
-      file_size: :bigint,
-      mtime_seconds: :bigint,
-      synced_entries: :bigint,
-      synced_at: :timestamp
-    ]
-  end
-
   defp status_text(%{enabled?: true} = state) do
     session_file = Map.get(state, :session_file) || "none yet"
-    db = mirror_database()
+    db = Config.database()
 
     "QuackDB mirror enabled · db=#{db} · session=#{session_file}"
   end
@@ -642,7 +522,7 @@ defmodule Pi.Mirror.QuackDB do
     count =
       session_file
       |> stream_session_lines(offset)
-      |> Stream.chunk_every(sync_batch_size())
+      |> Stream.chunk_every(Config.sync_batch_size())
       |> Enum.reduce(0, fn lines, count ->
         QuackDB.insert_columns!(conn, @table, session_entry_columns(session_file, lines),
           columns: @columns,
@@ -885,7 +765,7 @@ defmodule Pi.Mirror.QuackDB do
   defp append_row(%{buffer: buffer} = state, row) do
     buffer = [normalize_row(row) | buffer]
 
-    if length(buffer) >= mirror_batch_size() do
+    if length(buffer) >= Config.batch_size() do
       flush(%{state | buffer: buffer})
     else
       %{state | buffer: buffer}
@@ -894,7 +774,7 @@ defmodule Pi.Mirror.QuackDB do
 
   defp flush(%{conn: conn, buffer: buffer} = state) when buffer != [] do
     rows = Enum.reverse(buffer)
-    QuackDB.insert_rows!(conn, @table, rows, columns: @columns, batch_size: mirror_batch_size())
+    QuackDB.insert_rows!(conn, @table, rows, columns: @columns, batch_size: Config.batch_size())
     %{state | buffer: []}
   rescue
     _exception in [QuackDB.Error, DBConnection.ConnectionError, RuntimeError, ArgumentError] ->
@@ -932,54 +812,4 @@ defmodule Pi.Mirror.QuackDB do
     System.unique_integer([:positive, :monotonic])
     |> Integer.to_string()
   end
-
-  defp mirror_database do
-    path =
-      System.get_env("PI_ELIXIR_MIRROR_DB") ||
-        Path.join([System.user_home!(), ".pi", "elixir", "session-mirror.duckdb"])
-
-    File.mkdir_p!(Path.dirname(path))
-    path
-  end
-
-  defp mirror_duckdb do
-    case System.get_env("PI_ELIXIR_MIRROR_DUCKDB") do
-      nil -> :managed
-      "managed" -> :managed
-      path -> path
-    end
-  end
-
-  defp mirror_token(default), do: System.get_env("PI_ELIXIR_MIRROR_QUACKDB_TOKEN") || default
-
-  defp mirror_port do
-    case System.get_env("PI_ELIXIR_MIRROR_QUACKDB_PORT") do
-      nil -> 20_000 + rem(System.unique_integer([:positive]), 30_000)
-      port -> String.to_integer(port)
-    end
-  end
-
-  defp mirror_pool_size do
-    System.get_env("PI_ELIXIR_MIRROR_POOL_SIZE", "1") |> String.to_integer()
-  end
-
-  defp mirror_batch_size do
-    System.get_env("PI_ELIXIR_MIRROR_BATCH_SIZE", Integer.to_string(@default_batch_size))
-    |> String.to_integer()
-  end
-
-  defp sync_batch_size do
-    System.get_env("PI_ELIXIR_MIRROR_SYNC_BATCH_SIZE", Integer.to_string(@sync_batch_size))
-    |> String.to_integer()
-  end
-
-  defp mirror_daemon_options do
-    if System.get_env("PI_ELIXIR_DEBUG") == "1", do: [log_output: :debug], else: []
-  end
-
-  defp mirror_wait_timeout do
-    System.get_env("PI_ELIXIR_MIRROR_WAIT_TIMEOUT", "10000") |> String.to_integer()
-  end
-
-  defp compact_keyword(keyword), do: Enum.reject(keyword, fn {_key, value} -> is_nil(value) end)
 end

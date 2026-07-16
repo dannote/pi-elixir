@@ -14,10 +14,12 @@ import {
 } from '#src/connection/status.ts'
 import { recordDiagnostic, withDiagnosticSpan } from '#src/diagnostics.ts'
 import { elixirRuntimeProblem } from '#src/mix/runtime.ts'
+import { decodeStdioMessage } from '#src/protocol/stdio.ts'
 import type {
   BridgeBusEvent,
   BridgeEvent,
   BridgeInfo,
+  BridgeRequestMessage,
   BridgeUIEvent,
   PendingToolCall,
   StdioMessage,
@@ -34,6 +36,7 @@ const STARTUP_OUTPUT_CHUNK_CHARS = 2_000
 const STDERR_PREVIEW_CHARS = 2_000
 const STDERR_PREVIEW_CHUNK_CHARS = 500
 const DEPS_GET_TIMEOUT_MS = 120_000
+const SHUTDOWN_FORCE_MS = 1_000
 
 interface EmbeddedProcess {
   proc: childProcess.ChildProcess
@@ -61,7 +64,7 @@ export interface BridgeRequestResponder {
 
 type BridgeRequestHandler = (
   cwd: string,
-  message: StdioMessage,
+  message: BridgeRequestMessage,
   responder: BridgeRequestResponder
 ) => Promise<Record<string, unknown> | null | undefined>
 
@@ -144,8 +147,7 @@ function failPending(entry: EmbeddedProcess, error: Error): void {
 
 function parseMessage(line: string): StdioMessage | null {
   try {
-    const message: unknown = JSON.parse(line)
-    return typeof message === 'object' && message !== null ? (message as StdioMessage) : null
+    return decodeStdioMessage(JSON.parse(line) as unknown)
   } catch {
     return null
   }
@@ -177,10 +179,8 @@ function sendResponse(entry: EmbeddedProcess, id: string, response: ToolArgs): v
 async function handleBridgeRequest(
   cwd: string,
   entry: EmbeddedProcess,
-  message: StdioMessage
+  message: BridgeRequestMessage
 ): Promise<void> {
-  if (typeof message.id !== 'string') return
-
   const responder: BridgeRequestResponder = {
     llmChunk: (id, delta) => writeToBeam(entry, { type: 'llm_chunk', id, delta }),
     llmDone: (id, result) => writeToBeam(entry, { type: 'llm_done', id, result }),
@@ -274,12 +274,12 @@ function handleMessage(cwd: string, entry: EmbeddedProcess, message: StdioMessag
   }
 
   if (message.type === 'ui') {
-    emitUIEvent(cwd, message as BridgeUIEvent)
+    emitUIEvent(cwd, message)
     return
   }
 
   if (message.type === 'event') {
-    emitBusEvent(cwd, message as BridgeBusEvent)
+    emitBusEvent(cwd, message)
     return
   }
 
@@ -288,13 +288,13 @@ function handleMessage(cwd: string, entry: EmbeddedProcess, message: StdioMessag
     return
   }
 
-  if (message.type !== 'result' || typeof message.id !== 'number') return
+  if (message.type !== 'result') return
 
   const pending = entry.pending.get(message.id)
   if (!pending) return
 
   entry.pending.delete(message.id)
-  pending.resolve({ text: message.text ?? '', isError: message.isError ?? false })
+  pending.resolve({ text: message.text, isError: message.isError })
 }
 
 function appendStartupOutput(entry: EmbeddedProcess, text: string): void {
@@ -325,8 +325,8 @@ export function embeddedStartupTranscript(cwd: string): string | null {
   const entry = embeddedProcesses.get(cwd)
   if (!entry || entry.ready) return null
 
-  const output = entry.startupOutputPreview.join('\n').trim()
-  return output ? `$ mix run --no-halt -e '<stdio-start>'\n\n${output}` : null
+  const output = [...entry.startupOutputPreview, ...entry.stderrPreview].join('\n').trim()
+  return output ? `$ mix run -e '<stdio-start>'\n\n${output}` : null
 }
 
 function ensureBundledBridgeDeps(projectCwd: string, bridgeCwd: string): string | null {
@@ -422,12 +422,12 @@ export function startEmbeddedInBackground(cwd: string, restartAttempts = 0): voi
   }
 
   recordDiagnostic('embedded_start', cwd, {
-    command: 'mix run --no-halt -e <stdio-start>',
+    command: 'mix run -e <stdio-start>',
     bridgeCwd,
     projectCwd: cwd,
     mixEnv: mixChildEnv(cwd).MIX_ENV
   })
-  const proc = childProcess.spawn('mix', ['run', '--no-halt', '-e', START_STDIO_EXPR], {
+  const proc = childProcess.spawn('mix', ['run', '-e', START_STDIO_EXPR], {
     cwd: bridgeCwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: mixChildEnv(cwd)
@@ -504,11 +504,21 @@ export function startEmbeddedInBackground(cwd: string, restartAttempts = 0): voi
   })
 }
 
+function terminateProcess(proc: childProcess.ChildProcess): void {
+  if (proc.exitCode !== null && proc.exitCode !== undefined) return
+
+  proc.stdin?.end()
+  proc.kill('SIGTERM')
+  const force = setTimeout(() => proc.kill('SIGKILL'), SHUTDOWN_FORCE_MS)
+  const clearTimers = () => clearTimeout(force)
+  proc.once('exit', clearTimers)
+}
+
 export function stopEmbedded(cwd: string): void {
   const entry = embeddedProcesses.get(cwd)
   if (!entry) return
   recordDiagnostic('embedded_stop', cwd, { ready: entry.ready })
-  entry.proc.kill()
+  terminateProcess(entry.proc)
   embeddedProcesses.delete(cwd)
   connectionCache.delete(cwd)
   failPending(entry, new Error('Embedded BEAM process stopped'))

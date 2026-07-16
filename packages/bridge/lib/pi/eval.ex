@@ -2,7 +2,7 @@ defmodule Pi.Eval do
   @moduledoc "Runs bounded Elixir evals inside the project BEAM."
 
   alias Pi.Bridge.Info
-  alias Pi.Eval.{Diagnostics, Evaluator, ExceptionInfo, Sandbox, Supervisor}
+  alias Pi.Eval.{Context, Diagnostics, Evaluator, ExceptionInfo, Sandbox, Supervisor}
   alias Pi.Eval.Output, as: EvalOutput
   alias Pi.Output
   alias Pi.Protocol.Tool.Eval, as: EvalPayload
@@ -19,7 +19,7 @@ defmodule Pi.Eval do
   end
 
   @doc "Returns binding metadata for the current eval process."
-  def bindings, do: Evaluator.current_binding_info()
+  def bindings, do: Context.binding_info()
 
   @doc "Returns binding metadata for a stateful eval session."
   def bindings(session_id) when is_binary(session_id) do
@@ -29,7 +29,7 @@ defmodule Pi.Eval do
   end
 
   @doc "Schedules reset when called from inside eval."
-  def reset, do: Evaluator.put_control(:reset)
+  def reset, do: Context.put_control(:reset)
 
   @doc "Clears a stateful eval session."
   def reset(session_id) when is_binary(session_id) do
@@ -37,7 +37,7 @@ defmodule Pi.Eval do
   end
 
   @doc "Schedules forget when called from inside eval."
-  def forget(names), do: Evaluator.put_control({:forget, normalize_names!(names)})
+  def forget(names), do: Context.put_control({:forget, normalize_names!(names)})
 
   @doc "Forgets bindings in a stateful eval session."
   def forget(names, session_id) when is_binary(session_id) do

@@ -12,7 +12,7 @@ defmodule Pi.Plugin.WaitersTest do
   end
 
   test "registers, pops, and unregisters session waiters" do
-    {:ok, _pid} = Waiters.install()
+    assert :ok = Waiters.install()
 
     assert :ok = Waiters.register(@table, "session-1", self())
     assert {:ok, pid} = Waiters.pop(@table, "session-1")

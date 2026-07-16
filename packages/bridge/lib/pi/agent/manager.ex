@@ -3,31 +3,22 @@ defmodule Pi.Agent.Manager do
 
   use GenServer
 
+  alias Pi.Agent.Events
   alias Pi.Agent.Job
   alias Pi.Agent.JobSupervisor
+  alias Pi.Supervisor.Install
 
   defstruct jobs: %{}
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def install do
-    JobSupervisor.install()
-
-    case Process.whereis(__MODULE__) do
-      nil ->
-        case start_link([]) do
-          {:ok, pid} ->
-            Process.unlink(pid)
-            {:ok, pid}
-
-          other ->
-            other
-        end
-
-      _pid ->
-        :ok
-    end
+    with :ok <- normalize_install(JobSupervisor.install()),
+         do: Install.ensure(__MODULE__)
   end
+
+  defp normalize_install(:ok), do: :ok
+  defp normalize_install(error), do: error
 
   def start_job(task, opts \\ []) when is_binary(task) do
     install()
@@ -54,13 +45,14 @@ defmodule Pi.Agent.Manager do
     GenServer.call(__MODULE__, {:cancel, id})
   end
 
-  def job_finished(%Job{} = job) do
-    install()
-    GenServer.cast(__MODULE__, {:job_finished, job})
+  @impl true
+  def init(_opts) do
+    Events.register(self())
+    {:ok, %__MODULE__{}}
   end
 
   @impl true
-  def init(_opts), do: {:ok, %__MODULE__{}}
+  def terminate(_reason, _state), do: Events.unregister(self())
 
   @impl true
   def handle_call({:start_job, task, opts}, _from, state) do
@@ -115,11 +107,10 @@ defmodule Pi.Agent.Manager do
   end
 
   @impl true
-  def handle_cast({:job_finished, %Job{} = job}, state) do
+  def handle_info({:job_finished, %Job{} = job}, state) do
     {:noreply, put_in(state.jobs[job.id], job)}
   end
 
-  @impl true
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
     case Enum.find(state.jobs, fn {_id, job} -> job.pid == pid and job.status == :running end) do
       {id, job} ->

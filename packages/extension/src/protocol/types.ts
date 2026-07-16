@@ -114,25 +114,31 @@ export interface BridgeRequestPayload extends ToolArgs {
   data?: JSONObject
 }
 
-export interface StdioMessage {
-  type?: string
-  id?: number | string
-  text?: string
-  isError?: boolean
-  info?: BridgeInfo
-  op?: string
-  key?: string
-  title?: string
-  current?: number
-  total?: number
-  lines?: string[]
-  placement?: 'aboveEditor' | 'belowEditor'
-  message?: string
-  level?: 'info' | 'warning' | 'error'
-  name?: string
-  data?: JSONValue
+export interface BridgeReadyMessage {
+  type: 'ready'
+  info: BridgeInfo
+}
+
+export interface BridgeResultMessage {
+  type: 'result'
+  id: number
+  text: string
+  isError: boolean
+}
+
+export interface BridgeRequestMessage {
+  type: 'request'
+  id: string
+  op: string
   payload?: BridgeRequestPayload
 }
+
+export type StdioMessage =
+  | BridgeReadyMessage
+  | BridgeResultMessage
+  | BridgeRequestMessage
+  | BridgeUIEvent
+  | BridgeBusEvent
 
 export interface McpContent {
   type: string

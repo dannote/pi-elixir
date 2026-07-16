@@ -8,17 +8,19 @@ defmodule Pi.Plugin.Manager do
   alias Pi.Plugin.Worker
   alias Pi.Project.Context
   alias Pi.Protocol.PluginInfo
+  alias Pi.Supervisor.Install
 
   defstruct children: %{}, monitors: %{}, refs: %{}
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def install do
-    case Process.whereis(__MODULE__) do
-      nil -> start_link([])
-      _pid -> :ok
-    end
+    with :ok <- normalize_install(PluginSupervisor.install()),
+         do: Install.ensure(__MODULE__)
   end
+
+  defp normalize_install(:ok), do: :ok
+  defp normalize_install(error), do: error
 
   def load(module, opts \\ []) when is_atom(module) do
     install()

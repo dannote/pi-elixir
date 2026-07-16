@@ -4,7 +4,7 @@ defmodule Pi.Target.Connection do
   use GenServer
 
   alias Pi.Project.Context
-  alias Pi.Target.Runtime.Transport
+  alias Pi.Target.Runtime.{Manifest, Transport}
 
   @protocol 1
   @required_capabilities [
@@ -13,9 +13,6 @@ defmodule Pi.Target.Connection do
     :sidecar_restore,
     :timeout_cancellation
   ]
-  @bridge_root Path.expand("../../..", __DIR__)
-  @bootstrap Path.join(@bridge_root, "priv/target/bootstrap.exs")
-  @runtime_sources ~w(diagnostics.ex term.ex transport.ex snapshot.ex evaluator.ex worker.ex)
   @startup_timeout 60_000
   @packet_limit 32 * 1_024 * 1_024
 
@@ -218,7 +215,7 @@ defmodule Pi.Target.Connection do
   defp mix_args(state) do
     no_compile = if usable_build?(state.context), do: ["--no-compile"], else: []
     no_start = if state.profile == :project, do: ["--no-start"], else: []
-    ["run"] ++ no_compile ++ no_start ++ ["--no-halt", @bootstrap]
+    ["run"] ++ no_compile ++ no_start ++ ["--no-halt", bootstrap_path()]
   end
 
   defp usable_build?(context) do
@@ -235,7 +232,7 @@ defmodule Pi.Target.Connection do
       "PI_ELIXIR_TARGET_TOKEN" => token,
       "PI_ELIXIR_TARGET_PROFILE" => Atom.to_string(state.profile),
       "PI_ELIXIR_TARGET_BOOTSTRAP_HASH" => state.bootstrap_hash,
-      "PI_ELIXIR_TARGET_SOURCE_ROOT" => @bridge_root
+      "PI_ELIXIR_TARGET_SOURCE_ROOT" => target_source_root()
     }
     |> Enum.map(fn {key, value} -> {to_charlist(key), to_charlist(value)} end)
   end
@@ -343,14 +340,20 @@ defmodule Pi.Target.Connection do
     do: :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
 
   defp bootstrap_hash do
+    runtime_root = Path.join(target_source_root(), "runtime")
+
     [
-      @bootstrap
-      | Enum.map(@runtime_sources, &Path.join([@bridge_root, "lib/pi/target/runtime", &1]))
+      bootstrap_path(),
+      Path.join(runtime_root, "manifest.ex")
+      | Enum.map(Manifest.files(), &Path.join(runtime_root, &1))
     ]
     |> Enum.map(&File.read!/1)
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.encode16(case: :lower)
   end
+
+  defp bootstrap_path, do: Path.join(target_source_root(), "bootstrap.exs")
+  defp target_source_root, do: Application.app_dir(:pi_bridge, "priv/target")
 
   defp startup_error(reason, output) do
     %{

@@ -10,7 +10,8 @@ defmodule Pi.AST do
   alias Pi.Protocol.UI.Block
   alias Pi.Protocol.UI.Display
 
-  @missing_ex_ast "ex_ast is not installed. Add {:ex_ast, \"~> 0.1\", only: [:dev, :test], runtime: false} to mix.exs"
+  @missing_ex_ast "ex_ast is unavailable in the isolated pi-elixir bridge"
+  @pattern_syntax_guidance "ExAST patterns are valid Elixir, not ast-grep: use lowercase variables for captures, _ for one wildcard, and ... for zero or more nodes. Never use $NAME or $$$ARGS."
   @pattern_slots ~w(
     pi_ast_pattern_01 pi_ast_pattern_02 pi_ast_pattern_03 pi_ast_pattern_04 pi_ast_pattern_05
     pi_ast_pattern_06 pi_ast_pattern_07 pi_ast_pattern_08 pi_ast_pattern_09 pi_ast_pattern_10
@@ -25,7 +26,8 @@ defmodule Pi.AST do
   )a
 
   def search(pattern, opts \\ []) when is_binary(pattern) do
-    with :ok <- ensure_ex_ast() do
+    with :ok <- ensure_ex_ast(),
+         :ok <- validate_pattern(pattern) do
       path = Keyword.get(opts, :path)
       paths = paths(path)
 
@@ -46,7 +48,8 @@ defmodule Pi.AST do
   end
 
   def search_many(patterns, opts \\ []) when is_map(patterns) or is_list(patterns) do
-    with :ok <- ensure_ex_ast() do
+    with :ok <- ensure_ex_ast(),
+         :ok <- validate_patterns(patterns) do
       path = Keyword.get(opts, :path)
       paths = paths(path)
       {named_patterns, pattern_labels} = normalize_named_patterns(patterns)
@@ -94,7 +97,9 @@ defmodule Pi.AST do
 
   def replace(pattern, replacement, opts \\ [])
       when is_binary(pattern) and is_binary(replacement) do
-    with :ok <- ensure_ex_ast() do
+    with :ok <- ensure_ex_ast(),
+         :ok <- validate_pattern(pattern),
+         :ok <- validate_replacement(replacement) do
       path = Keyword.get(opts, :path)
       dry_run = Keyword.get(opts, :dry_run, false)
 
@@ -120,6 +125,29 @@ defmodule Pi.AST do
          diffs: diffs,
          display: replace_display(replacements, diffs)
        }}
+    end
+  end
+
+  defp validate_patterns(patterns) do
+    Enum.reduce_while(patterns, :ok, fn {name, pattern}, :ok ->
+      case validate_pattern(pattern) do
+        :ok -> {:cont, :ok}
+        {:error, message} -> {:halt, {:error, "Named pattern #{name}: #{message}"}}
+      end
+    end)
+  end
+
+  defp validate_pattern(pattern), do: validate_elixir(pattern, "pattern")
+  defp validate_replacement(replacement), do: validate_elixir(replacement, "replacement")
+
+  defp validate_elixir(source, label) do
+    case Code.string_to_quoted(source) do
+      {:ok, _ast} ->
+        :ok
+
+      {:error, {_location, message, token}} ->
+        parser_message = message <> to_string(token)
+        {:error, "Invalid ExAST #{label}: #{parser_message}. #{@pattern_syntax_guidance}"}
     end
   end
 

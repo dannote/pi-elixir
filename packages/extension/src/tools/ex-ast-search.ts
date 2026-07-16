@@ -72,8 +72,13 @@ export function register(pi: ExtensionAPI) {
     'elixir_ast_search',
     'ex_ast_search',
     'ast grep',
-    `Search Elixir source by AST pattern. Prefer this over grep/regex for calls, functions, callbacks, pipelines, structs, maps, tuples, macros, and other code shapes.
-Variables capture nodes, _ is a wildcard, and structs/maps match partially. Use pattern for one search or patterns for one-pass named searches. ExAST runs in pi-elixir's isolated bridge; the target project needs no dependency.
+    `Search Elixir source with ExAST patterns—not ast-grep patterns.
+
+CRITICAL SYNTAX: patterns must be valid Elixir. Never use ast-grep metavariables such as $NAME or $$$ARGS. A lowercase Elixir variable captures one node, _ is a non-capturing wildcard, and the literal Elixir form ... matches zero or more nodes. Structs/maps match partially. Use pattern for one search or patterns for one-pass named searches. ExAST runs in pi-elixir's isolated bridge; the target project needs no dependency.
+
+Conversions:
+- ast-grep $MODULE.__rustq_asts__() → ExAST module.__rustq_asts__()
+- ast-grep foo($FIRST, $$$REST) → ExAST foo(first, ...)
 
 Examples:
 - 'IO.inspect(_)' — find all IO.inspect calls
@@ -81,10 +86,16 @@ Examples:
 - 'def handle_call(_, _, _) do _ end' — find GenServer callbacks
 - '{:error, reason}' — find error tuples and capture the reason`,
     Type.Object({
-      pattern: Type.Optional(Type.String({ description: 'Elixir AST pattern to match' })),
+      pattern: Type.Optional(
+        Type.String({
+          description:
+            'Valid Elixir ExAST pattern. Use lowercase variables and ...; never use $NAME or $$$ARGS.'
+        })
+      ),
       patterns: Type.Optional(
         Type.Record(Type.String(), Type.String(), {
-          description: 'Named Elixir AST patterns to match in one traversal'
+          description:
+            'Named valid-Elixir ExAST patterns. Use lowercase variables and ...; never $ metavariables.'
         })
       ),
       ...astSearchOptions

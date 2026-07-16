@@ -11,7 +11,12 @@ defmodule Pi.Target.Supervisor do
     do: DynamicSupervisor.start_link(__MODULE__, opts, name: __MODULE__)
 
   def connection(%Context{} = context, profile \\ :project) do
-    install()
+    with :ok <- install() do
+      lookup_connection(context, profile)
+    end
+  end
+
+  defp lookup_connection(context, profile) do
     key = {context.root, profile}
 
     case Registry.lookup(Pi.Target.Registry, key) do
@@ -31,29 +36,14 @@ defmodule Pi.Target.Supervisor do
   end
 
   def install do
-    with :ok <- install_registry(), do: Install.ensure(__MODULE__)
+    if Process.whereis(__MODULE__) && Process.whereis(Pi.Target.Registry),
+      do: :ok,
+      else: {:error, :target_runtime_not_started}
   end
+
+  @doc false
+  def reset, do: Install.reset_dynamic(__MODULE__)
 
   @impl true
   def init(_opts), do: DynamicSupervisor.init(strategy: :one_for_one)
-
-  defp install_registry do
-    case Process.whereis(Pi.Target.Registry) do
-      nil ->
-        case Registry.start_link(keys: :unique, name: Pi.Target.Registry) do
-          {:ok, pid} ->
-            Process.unlink(pid)
-            :ok
-
-          {:error, {:already_started, _pid}} ->
-            :ok
-
-          error ->
-            error
-        end
-
-      _pid ->
-        :ok
-    end
-  end
 end

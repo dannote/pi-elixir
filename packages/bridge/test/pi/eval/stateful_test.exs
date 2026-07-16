@@ -4,8 +4,7 @@ defmodule Pi.Eval.StatefulTest do
   alias Pi.Eval
 
   setup do
-    if pid = Process.whereis(Pi.Eval.Supervisor), do: DynamicSupervisor.stop(pid)
-    if pid = Process.whereis(Pi.Eval.Registry), do: GenServer.stop(pid)
+    Pi.Eval.Supervisor.reset()
 
     dir = Path.join(System.tmp_dir!(), "pi-eval-stateful-#{System.unique_integer([:positive])}")
     File.rm_rf!(dir)
@@ -138,8 +137,5 @@ defmodule Pi.Eval.StatefulTest do
     assert payload.text =~ "CompileError"
   end
 
-  defp stop_eval_processes do
-    if pid = Process.whereis(Pi.Eval.Supervisor), do: DynamicSupervisor.stop(pid)
-    if pid = Process.whereis(Pi.Eval.Registry), do: GenServer.stop(pid)
-  end
+  defp stop_eval_processes, do: Pi.Eval.Supervisor.reset()
 end

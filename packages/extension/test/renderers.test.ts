@@ -434,10 +434,11 @@ describe('elixir result rendering', () => {
         {
           kind: 'tree',
           body: JSON.stringify([
-            { key: ':changed_functions', value: '[]' },
-            { key: ':recommendation', value: 'Prefer stopping.' }
+            { key: 'changed_functions', value: '[]' },
+            { key: 'recommendation', value: 'Prefer stopping.' }
           ]),
-          title: 'map with 2 keys'
+          title: 'map with 2 keys',
+          data: { title_kind: 'generated' }
         }
       ]
     })
@@ -460,13 +461,14 @@ describe('elixir result rendering', () => {
         {
           kind: 'tree',
           body: JSON.stringify([
-            { key: ':status', value: '200' },
-            { key: ':title', value: 'Example Domain' },
-            { key: ':format', value: ':text' },
-            { key: ':truncated?', value: 'false' }
+            { key: 'status', value: '200' },
+            { key: 'title', value: 'Example Domain' },
+            { key: 'format', value: ':text' },
+            { key: 'truncated?', value: 'false' }
           ]),
           title: 'map with 4 keys',
           data: {
+            title_kind: 'generated',
             inspect_preview:
               '%{\n  status: 200,\n  title: "Example Domain",\n  format: :text,\n  truncated?: false\n}'
           }
@@ -611,10 +613,11 @@ describe('elixir result rendering', () => {
         {
           kind: 'tree',
           body: JSON.stringify([
-            { key: ':app', value: ':pi_bridge' },
-            { key: ':versions', value: [{ key: ':bridge', value: '0.6.3' }] }
+            { key: 'app', value: ':pi_bridge' },
+            { key: 'versions', value: [{ key: 'bridge', value: '0.6.3' }] }
           ]),
-          title: 'map with 2 keys'
+          title: 'map with 2 keys',
+          data: { title_kind: 'generated' }
         }
       ]
     })

@@ -316,7 +316,7 @@ describe('resolveUrl', () => {
     expect(result).toBeNull()
     expect(childProcess.spawn).toHaveBeenCalledWith(
       'mix',
-      expect.arrayContaining(['run', '--no-halt']),
+      ['run', '-e', 'Pi.Transport.Stdio.start()'],
       expect.objectContaining({
         cwd: expect.stringContaining('packages/bridge'),
         env: expect.objectContaining({ PI_ELIXIR_PROJECT_CWD: '/embedded-project' })
@@ -348,7 +348,7 @@ end`)
     expect(getConnectionKind('/missing-dep-project')).toBe('starting')
     expect(childProcess.spawn).toHaveBeenCalledWith(
       'mix',
-      expect.arrayContaining(['run', '--no-halt']),
+      ['run', '-e', 'Pi.Transport.Stdio.start()'],
       expect.objectContaining({
         env: expect.objectContaining({ PI_ELIXIR_PROJECT_CWD: '/missing-dep-project' })
       })

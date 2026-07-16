@@ -5,12 +5,13 @@ defmodule Pi.ReqLLMTest do
   alias Pi.Protocol.Response
 
   setup do
-    :persistent_term.put({Pi.Transport.Stdio, :pid}, self())
+    owner = self()
+    Pi.Transport.register(owner)
     ReqLLM.Providers.initialize()
     Pi.ReqLLM.install()
 
     on_exit(fn ->
-      :persistent_term.erase({Pi.Transport.Stdio, :pid})
+      Pi.Transport.unregister(owner)
       ReqLLM.Providers.unregister(:pi)
     end)
 

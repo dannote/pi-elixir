@@ -80,10 +80,10 @@ As the final step of a complete release:
 - Do not add Hex package links.
 - Do not add generated prose.
 
-Example:
+Use the project's canonical release-note extractor when one exists. Otherwise, copy the matching changelog section exactly into a temporary notes file; do not locate Markdown sections with regular expressions.
 
 ```bash
-gh release create vX.Y.Z --title "vX.Y.Z" --notes "$(awk '/^## X.Y.Z /{flag=1; next} /^## /{flag=0} flag' CHANGELOG.md)"
+gh release create vX.Y.Z --title "vX.Y.Z" --notes-file /tmp/package-release-notes.md
 ```
 
 ## Downstream update after publish

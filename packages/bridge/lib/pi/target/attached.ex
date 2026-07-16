@@ -3,7 +3,6 @@ defmodule Pi.Target.Attached do
 
   use GenServer
 
-  alias Pi.Supervisor.Install
   alias Pi.Target.Result
   alias Pi.Target.Runtime.{Diagnostics, Evaluator, Snapshot, Term}
 
@@ -27,6 +26,9 @@ defmodule Pi.Target.Attached do
     call({:eval, code, opts}, timeout + 5_000)
   end
 
+  @doc false
+  def reset, do: call(:reset, 5_000)
+
   def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
   @impl true
@@ -47,6 +49,14 @@ defmodule Pi.Target.Attached do
       {:error, reason} ->
         {:reply, %{connected: false, error: reason}, state}
     end
+  end
+
+  def handle_call(:reset, _from, state) do
+    Enum.each(state, fn {{node, _session_id}, evaluator} ->
+      _ = remote_call(node, Process, :exit, [evaluator, :kill], 5_000)
+    end)
+
+    {:reply, :ok, %{}}
   end
 
   def handle_call({:eval, code, opts}, _from, state) do
@@ -76,7 +86,9 @@ defmodule Pi.Target.Attached do
     end
   end
 
-  defp ensure_started, do: Install.ensure(__MODULE__)
+  defp ensure_started do
+    if Process.whereis(__MODULE__), do: :ok, else: {:error, :attached_runtime_not_started}
+  end
 
   defp connect(opts) do
     with {:ok, configured_node} <- configured_node(opts) do

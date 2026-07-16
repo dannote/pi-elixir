@@ -17,12 +17,7 @@ defmodule Pi.SessionTest do
     :ok
   end
 
-  defp stop_supervisor do
-    if pid = Process.whereis(SessionSupervisor) do
-      Process.exit(pid, :kill)
-      Process.sleep(5)
-    end
-  end
+  defp stop_supervisor, do: SessionSupervisor.reset()
 
   test "starts, lists, and looks up server-owned sessions" do
     assert {:ok, pid} = Session.start(name: :reviewer)
@@ -77,7 +72,7 @@ defmodule Pi.SessionTest do
   end
 
   test "emits session snapshots over the pi event bus" do
-    :persistent_term.put({Pi.Transport.Stdio, :pid}, self())
+    Pi.Transport.register(self())
 
     ask = fn _messages, _opts -> {:ok, "ok"} end
     assert {:ok, pid} = Session.start(name: :reviewer, ask_fun: ask)
@@ -88,7 +83,7 @@ defmodule Pi.SessionTest do
     assert field(snapshot, :name) == "reviewer"
     assert field(snapshot, :latest) == "ok"
   after
-    :persistent_term.erase({Pi.Transport.Stdio, :pid})
+    Pi.Transport.unregister(self())
   end
 
   defp receive_done_snapshot do
@@ -172,7 +167,7 @@ defmodule Pi.SessionTest do
   end
 
   test "host session helpers accept keyword custom data" do
-    :persistent_term.put({Pi.Transport.Stdio, :pid}, self())
+    Pi.Transport.register(self())
 
     append_task = Task.async(fn -> Host.append_entry("demo-state", count: 1) end)
     assert_request(:append_entry, "demo-state", %{"count" => 1})
@@ -186,7 +181,7 @@ defmodule Pi.SessionTest do
     assert_request(:append_entry, "compat-state", %{"count" => 3})
     assert {:ok, "ok"} = Task.await(compat_task)
   after
-    :persistent_term.erase({Pi.Transport.Stdio, :pid})
+    Pi.Transport.unregister(self())
   end
 
   test "returns camelCase protocol snapshots" do

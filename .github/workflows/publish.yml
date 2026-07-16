@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -52,6 +52,12 @@ jobs:
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
 
+      - name: Publish pi_bridge docs to HexDocs
+        run: mix hex.publish docs --yes
+        working-directory: packages/bridge
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+
       - name: Publish to npm with token
         if: ${{ env.HAS_NPM_TOKEN == 'true' }}
         run: pnpm publish --access public --provenance --no-git-checks
@@ -61,3 +67,10 @@ jobs:
       - name: Publish to npm with trusted publishing
         if: ${{ env.HAS_NPM_TOKEN != 'true' }}
         run: pnpm publish --access public --provenance --no-git-checks
+
+      - name: Create GitHub Release
+        run: |
+          node scripts/release-notes.ts /tmp/pi-elixir-release-notes.md
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file /tmp/pi-elixir-release-notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}

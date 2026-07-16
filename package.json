@@ -1,17 +1,15 @@
 {
   "name": "pi-elixir",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "BEAM runtime tools for pi — connects to the running Elixir app for live introspection",
   "keywords": [
     "pi-package"
   ],
   "license": "MIT",
-  "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/elixir-vibe/pi-elixir"
   },
-  "packageManager": "pnpm@11.5.3",
   "files": [
     "README.md",
     "CHANGELOG.md",
@@ -25,6 +23,10 @@
     "packages/bridge/mix.lock",
     "packages/bridge/README.md"
   ],
+  "type": "module",
+  "imports": {
+    "#src/*": "./packages/extension/src/*"
+  },
   "scripts": {
     "lint": "pnpm run lint:js && pnpm run lint:beam",
     "lint:js": "pnpm --dir packages/extension run lint",
@@ -37,13 +39,15 @@
     "test:integration": "pnpm --dir packages/extension run test:integration",
     "test:integration:smoke": "pnpm --dir packages/extension run test:integration:smoke",
     "test:dupes": "pnpm --dir packages/extension run test:dupes",
-    "check": "pnpm run check:js && pnpm run check:beam && pnpm run check:integration && pnpm run hex:check && pnpm run pack:check",
+    "check": "pnpm run check:js && pnpm run check:beam && pnpm run check:integration && pnpm run release:check && pnpm run hex:check && pnpm run pack:check && pnpm run pack:smoke",
     "check:js": "pnpm --dir packages/extension run check",
     "check:beam": "cd packages/bridge && mix ci",
     "check:integration": "pnpm run test:integration:smoke",
     "ci": "pnpm run check",
-    "hex:check": "cd packages/bridge && mix hex.build --unpack --output /tmp/pi_bridge_hex_check >/dev/null && rm -rf /tmp/pi_bridge_hex_check",
+    "hex:check": "rm -rf /tmp/pi_bridge_hex_check && cd packages/bridge && mix hex.build --unpack --output /tmp/pi_bridge_hex_check >/dev/null && test -f /tmp/pi_bridge_hex_check/priv/target/bootstrap.exs && test -f /tmp/pi_bridge_hex_check/priv/target/runtime/manifest.ex && test -f /tmp/pi_bridge_hex_check/priv/target/runtime/worker.ex && rm -rf /tmp/pi_bridge_hex_check",
+    "release:check": "node --test scripts/release-notes.test.ts && node scripts/release-notes.ts /tmp/pi-elixir-release-notes.md",
     "pack:check": "node scripts/check-pack.ts && pnpm pack --dry-run --json > /dev/null",
+    "pack:smoke": "node scripts/smoke-packed-package.ts",
     "dogfood": "pi --no-extensions --extension ./packages/extension/src/index.ts",
     "dogfood:install": "pi install .",
     "dogfood:smoke": "PI_OFFLINE=1 pi --no-extensions --no-context-files --no-session --extension ./packages/extension/src/index.ts --tools elixir_eval --print 'Use elixir_eval with target bridge to return Application.spec(:pi_bridge, :vsn) |> to_string().'"
@@ -58,11 +62,14 @@
     "@pnpm/fs.packlist": "^1100.0.1",
     "@types/node": "^25.0.0",
     "jscpd": "^4.0.5",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-to-string": "^4.0.0",
     "oxfmt": "^0.35.0",
     "oxlint": "^1.50.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
+  "packageManager": "pnpm@11.5.3",
   "pi": {
     "extensions": [
       "./packages/extension/src/index.ts"
@@ -70,8 +77,5 @@
     "skills": [
       "./packages/extension/skills"
     ]
-  },
-  "imports": {
-    "#src/*": "./packages/extension/src/*"
   }
 }

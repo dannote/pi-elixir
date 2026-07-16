@@ -2,12 +2,14 @@ import { getMarkdownTheme, highlightCode, type Theme } from '@earendil-works/pi-
 import { Markdown, visibleWidth, type Component } from '@earendil-works/pi-tui'
 
 import { truncateLine } from '../helpers.ts'
+import { numberMetadata, stringMetadata } from './output-metadata.ts'
+import type { OutputPart } from './output-types.ts'
+import { renderWebDocument } from './output-web.ts'
 import {
   codeFrameLines,
   codeLines,
   comparableInspectText,
   compactText,
-  decodeInspectedString,
   expandHint,
   hiddenLine,
   highlightedFrameLines,
@@ -16,14 +18,6 @@ import {
   renderLines,
   stripFinalNewline
 } from './shared.ts'
-
-export interface OutputPart {
-  kind?: string
-  body?: string
-  language?: string | null
-  title?: string | null
-  data?: Record<string, unknown> | null
-}
 
 interface HighlightSpan {
   text?: string
@@ -177,31 +171,8 @@ function renderMarkdownTable(
   }
 }
 
-function isAsciiLetter(character: string) {
-  return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z')
-}
-
-function bareAtomName(label: string): string | undefined {
-  if (!label.startsWith(':')) return undefined
-
-  const name = label.slice(1)
-  const [first, ...rest] = Array.from(name)
-  const validFirst = first !== undefined && (first === '_' || isAsciiLetter(first))
-  const validRest = rest.every(
-    (character) =>
-      isAsciiLetter(character) ||
-      (character >= '0' && character <= '9') ||
-      ['_', '?', '!', '@'].includes(character)
-  )
-  return validFirst && validRest ? name : undefined
-}
-
 function treeKeyLabel(key: unknown) {
-  const label = tableCell(key)
-  const atom = bareAtomName(label)
-  if (atom) return atom
-  if (label.startsWith('"') && label.endsWith('"')) return decodeInspectedString(label)
-  return label
+  return tableCell(key)
 }
 
 function renderTreeValue(value: unknown, theme: Theme, prefix = ''): string[] {
@@ -234,10 +205,8 @@ function treeInspectPreview(part: OutputPart): string | undefined {
   return stringMetadata(part.data?.inspect_preview ?? part.data?.inspectPreview)
 }
 
-function genericTreeTitle(title: string) {
-  return (
-    title === 'tree' || /^map with \d+ keys$/u.test(title) || /^list with \d+ items$/u.test(title)
-  )
+function hasGeneratedTreeTitle(part: OutputPart) {
+  return stringMetadata(part.data?.title_kind ?? part.data?.titleKind) === 'generated'
 }
 
 function treeExpandLine(hidden: number, theme: Theme) {
@@ -256,7 +225,7 @@ function renderCompactTreePart(part: OutputPart, theme: Theme): Component | null
       const shown = rawLines.slice(0, maxLines).map((line) => truncateLine(line, width))
       const hidden = rawLines.length - shown.length
       const title = partPreview(part)
-      const titleLines = genericTreeTitle(title) ? [] : [truncateLine(title, width)]
+      const titleLines = hasGeneratedTreeTitle(part) ? [] : [truncateLine(title, width)]
       const expand = treeExpandLine(hidden, theme)
       return ['', ...titleLines, ...shown, ...(expand ? [expand] : [])]
     },
@@ -272,18 +241,6 @@ function renderOnlyTablePart(
   const onlyPart = visibleParts.length === 1 ? visibleParts[0] : undefined
   if (onlyPart?.kind !== 'table') return null
   return renderMarkdownTable(onlyPart, theme, { maxRows: expanded ? 20 : 1, expanded })
-}
-
-function numberMetadata(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function stringMetadata(value: unknown): string | undefined {
-  return typeof value === 'string' && value ? value : undefined
-}
-
-function booleanMetadata(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
 }
 
 function highlightPayload(part: OutputPart): HighlightPayload | null {
@@ -382,27 +339,6 @@ function highlightedCodeFrameLines(
   return lines ? highlightedFrameLines(lines, theme, options) : null
 }
 
-function formatBytes(value: number | undefined) {
-  if (value === undefined) return undefined
-  if (value < 1024) return `${value} B`
-  const units = ['KB', 'MB', 'GB']
-  let size = value / 1024
-  for (const unit of units) {
-    if (size < 1024 || unit === units[units.length - 1]) return `${size.toFixed(1)} ${unit}`
-    size /= 1024
-  }
-  return `${value} B`
-}
-
-function statusLabel(status: number | undefined) {
-  if (status === undefined) return '?'
-  if (status >= 200 && status < 300) return `${status} OK`
-  if (status >= 300 && status < 400) return `${status} redirect`
-  if (status >= 400 && status < 500) return `${status} client error`
-  if (status >= 500) return `${status} server error`
-  return String(status)
-}
-
 function relativeSourcePath(path: string | undefined) {
   if (!path) return undefined
   const marker = '/packages/bridge/'
@@ -482,157 +418,6 @@ function renderOnlyTreePart(visibleParts: OutputPart[], expanded: boolean, theme
   return renderCompactTreePart(onlyPart, theme)
 }
 
-function documentKind(part: OutputPart) {
-  return stringMetadata(part.data?.document_kind ?? part.data?.documentKind)
-}
-
-function renderOnlyDocumentPart(
-  visibleParts: OutputPart[],
-  expanded: boolean,
-  theme: Theme
-): Component | null {
-  const onlyPart = visibleParts.length === 1 ? visibleParts[0] : undefined
-  if (onlyPart?.kind !== 'document') return null
-  if (documentKind(onlyPart) !== 'web_fetch') return null
-  return renderWebFetchPart(onlyPart, expanded, theme)
-}
-
-function webFetchMetaLine(part: OutputPart) {
-  const status = statusLabel(numberMetadata(part.data?.status))
-  const contentType = stringMetadata(part.data?.content_type ?? part.data?.contentType)
-  const bytes = formatBytes(numberMetadata(part.data?.size_bytes ?? part.data?.sizeBytes))
-  return ['Web fetch', status, contentType, bytes].filter(Boolean).join(' · ')
-}
-
-function webFetchUrlLines(part: OutputPart) {
-  const url = stringMetadata(part.data?.url)
-  const finalUrl = stringMetadata(part.data?.final_url ?? part.data?.finalUrl)
-  const redirected = booleanMetadata(part.data?.redirected) || (url && finalUrl && url !== finalUrl)
-  if (!url) return []
-  if (redirected && finalUrl) return [url, `→ ${finalUrl}`]
-  return [url]
-}
-
-function webFetchFooterText(part: OutputPart) {
-  const chars = numberMetadata(part.data?.total_chars ?? part.data?.totalChars)
-  const truncated = booleanMetadata(part.data?.truncated) === true
-  return `${chars ?? visibleWidth(part.body ?? '')} chars · ${truncated ? 'truncated' : 'not truncated'}`
-}
-
-function compactWebBodyLines(part: OutputPart, title: string | undefined) {
-  const lines = stripFinalNewline(part.body ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-
-  const bodyLines = title
-    ? lines.filter((line) => line !== title && line !== `${title} ${title}`)
-    : lines
-
-  return bodyLines.slice(0, 1)
-}
-
-function renderCompactWebFetchPart(part: OutputPart, theme: Theme): Component {
-  return {
-    render: (width) => {
-      const title = stringMetadata(part.data?.title)
-      const shownBody = compactWebBodyLines(part, title)
-      return [
-        '',
-        theme.fg('muted', truncateLine(webFetchMetaLine(part), width)),
-        ...webFetchUrlLines(part).map((line) => theme.fg('muted', truncateLine(line, width))),
-        ...(title
-          ? [theme.fg('muted', '→ ') + theme.fg('toolOutput', truncateLine(title, width - 2))]
-          : []),
-        ...shownBody.map((line) => theme.fg('toolOutput', truncateLine(line, width))),
-        theme.fg('muted', webFetchFooterText(part)) + theme.fg('muted', ' · ') + expandHint(theme)
-      ]
-    },
-    invalidate: () => undefined
-  }
-}
-
-function metadataRow(
-  label: string,
-  value: string | number | boolean | undefined | null,
-  theme: Theme
-) {
-  if (value === undefined || value === null || value === '') return undefined
-  return `${theme.fg('muted', label.padEnd(13))} ${theme.fg('toolOutput', String(value))}`
-}
-
-function sectionHeader(label: string, theme: Theme) {
-  const muted = theme.fg('muted', label)
-  const bold = (theme as Theme & { bold?: (text: string) => string }).bold
-  return bold ? bold(muted) : muted
-}
-
-function yesNo(value: boolean | undefined) {
-  return value ? 'yes' : 'no'
-}
-
-function webFetchExpandedHeader(part: OutputPart, format: string, theme: Theme) {
-  return [
-    '',
-    sectionHeader('Web fetch', theme),
-    metadataRow('Status:', statusLabel(numberMetadata(part.data?.status)), theme),
-    metadataRow('URL:', stringMetadata(part.data?.url), theme),
-    metadataRow('Final URL:', stringMetadata(part.data?.final_url ?? part.data?.finalUrl), theme),
-    metadataRow(
-      'Content-Type:',
-      stringMetadata(part.data?.content_type ?? part.data?.contentType),
-      theme
-    ),
-    metadataRow('Format:', format, theme),
-    metadataRow(
-      'Size:',
-      formatBytes(numberMetadata(part.data?.size_bytes ?? part.data?.sizeBytes)),
-      theme
-    ),
-    metadataRow('Chars:', numberMetadata(part.data?.total_chars ?? part.data?.totalChars), theme),
-    metadataRow('Redirected:', yesNo(booleanMetadata(part.data?.redirected)), theme),
-    metadataRow('Truncated:', yesNo(booleanMetadata(part.data?.truncated)), theme)
-  ].filter((line): line is string => line !== undefined)
-}
-
-function webFetchExpandedBodyLines(output: string, format: string, width: number, theme: Theme) {
-  if (format === 'markdown') return new Markdown(output, 0, 0, getMarkdownTheme()).render(width)
-  if (format === 'json' || format === 'html') return codeLines(output, format, theme)
-  return output.split('\n').map((line) => theme.fg('toolOutput', line))
-}
-
-function webFetchExpandedBodyHeader(part: OutputPart, theme: Theme) {
-  const title = stringMetadata(part.data?.title)
-  return title
-    ? [
-        '',
-        sectionHeader('Title', theme),
-        theme.fg('toolOutput', title),
-        '',
-        sectionHeader('Body', theme)
-      ]
-    : ['', sectionHeader('Body', theme)]
-}
-
-function renderExpandedWebFetchPart(part: OutputPart, theme: Theme): Component {
-  return {
-    render: (width) => {
-      const output = stripFinalNewline(part.body ?? '')
-      const format = stringMetadata(part.data?.format) ?? part.language ?? 'text'
-      return [
-        ...webFetchExpandedHeader(part, format, theme),
-        ...webFetchExpandedBodyHeader(part, theme),
-        ...webFetchExpandedBodyLines(output, format, width, theme)
-      ]
-    },
-    invalidate: () => undefined
-  }
-}
-
-function renderWebFetchPart(part: OutputPart, expanded: boolean, theme: Theme): Component {
-  return expanded ? renderExpandedWebFetchPart(part, theme) : renderCompactWebFetchPart(part, theme)
-}
-
 function compactHighlightedPreview(part: OutputPart, theme: Theme): string | null {
   const line = highlightedBodyLines(part, theme)?.[0]
   return line ?? null
@@ -701,7 +486,7 @@ export function renderOutputParts(parts: OutputPart[], expanded: boolean, theme:
   const table = renderOnlyTablePart(visibleParts, expanded, theme)
   if (table) return table
 
-  const document = renderOnlyDocumentPart(visibleParts, expanded, theme)
+  const document = renderWebDocument(visibleParts, expanded, theme)
   if (document) return document
 
   const source = renderOnlySourcePart(visibleParts, expanded, theme)

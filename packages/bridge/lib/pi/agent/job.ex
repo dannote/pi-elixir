@@ -3,7 +3,7 @@ defmodule Pi.Agent.Job do
 
   use GenServer
 
-  alias Pi.Agent.Manager
+  alias Pi.Agent.Events
   alias Pi.Session, as: RuntimeSession
   alias Pi.Session.Event
 
@@ -172,9 +172,11 @@ defmodule Pi.Agent.Job do
     }
 
     emit_parent_event(job, :agent_job_finished, job_data(job))
-    Manager.job_finished(job)
+    notify_manager(job)
     job
   end
+
+  defp notify_manager(job), do: Events.notify({:job_finished, job})
 
   defp emit_parent_event(%{parent_session_id: nil}, _type, _data), do: :ok
 

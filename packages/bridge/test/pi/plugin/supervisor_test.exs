@@ -26,6 +26,7 @@ defmodule Pi.Plugin.SupervisorTest do
 
   defp install_supervisor do
     case PluginSupervisor.install() do
+      :ok -> {:ok, Process.whereis(PluginSupervisor)}
       {:ok, pid} -> {:ok, pid}
       {:error, {:already_started, pid}} -> {:ok, pid}
     end

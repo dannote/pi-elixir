@@ -226,8 +226,5 @@ defmodule Pi.Target.ConnectionTest do
     refute after_exit.result == before_exit.result
   end
 
-  defp stop_targets do
-    if pid = Process.whereis(Pi.Target.Supervisor), do: DynamicSupervisor.stop(pid)
-    if pid = Process.whereis(Pi.Target.Registry), do: GenServer.stop(pid)
-  end
+  defp stop_targets, do: Pi.Target.Supervisor.reset()
 end

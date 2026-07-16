@@ -80,7 +80,7 @@ ast grep defmodule _ do _ end lib/my_app
 ast edit Logger.debug(_) → Logger.info(_) lib/my_app --dry-run
 ```
 
-These tools match Elixir AST, including captures and nested expressions. They are for structural Elixir search/refactors; use LSP for editor semantics and `mix format`/tests for verification.
+These tools use valid-Elixir ExAST syntax, not ast-grep metavariables: lowercase variables capture nodes, `_` matches one node without capturing, and `...` matches zero or more nodes. Never use `$NAME` or `$$$ARGS` with the Elixir AST tools. They are for structural Elixir search/refactors; use LSP for editor semantics and `mix format`/tests for verification.
 
 ### Review changed Elixir safely
 
@@ -163,7 +163,7 @@ Resolution order:
 2. Discovered local HTTP MCP endpoint matching the Mix app name.
 3. Bundled embedded stdio control bridge, with `PI_ELIXIR_PROJECT_CWD` identifying the target project.
 
-The control bridge then routes eval to one of four strict targets: dependencyless persistent `project`, managed `application`, attached distributed `runtime`, or `bridge`. Ready state is accepted only when build, protocol, and required capabilities match; one stale child is replaced atomically before an incompatibility is reported.
+The control bridge then routes eval to one of four strict targets: dependencyless persistent `project`, managed `application`, attached distributed `runtime`, or `bridge`. Ready state is accepted only when build, protocol, and required capabilities match; one stale child is replaced atomically before an incompatibility is reported. The supervision and dependency boundaries are documented in [`packages/bridge/docs/architecture.md`](packages/bridge/docs/architecture.md).
 
 ```sh
 # Advanced/debug only: bypass embedded stdio and use your own HTTP MCP endpoint.

@@ -3,15 +3,14 @@ defmodule Pi.LogCapture do
 
   use GenServer
 
+  alias Pi.Supervisor.Install
+
   @levels Map.new(~w[emergency alert critical error warning notice info debug]a, &{"#{&1}", &1})
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def install do
-    case Process.whereis(__MODULE__) do
-      nil -> start_link([])
-      _pid -> :ok
-    end
+    _ = Install.ensure(__MODULE__)
 
     case :logger.add_handler(__MODULE__, __MODULE__, %{
            formatter: Logger.default_formatter(colors: [enabled: false])

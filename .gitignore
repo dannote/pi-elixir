@@ -1,6 +1,8 @@
 node_modules/
 _build/
 deps/
+doc/
+erl_crash.dump
 
 # Git worktrees for parallel agent work
 .worktrees/

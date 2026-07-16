@@ -41,21 +41,25 @@ defmodule Pi.Agent.Step do
   def to_session(step, opts \\ [])
 
   def to_session(%__MODULE__{prompt: prompt} = step, opts) when is_binary(prompt) do
-    Pi.Agent.session(prompt,
-      name: step.name || Keyword.get(opts, :name),
-      system: step.system || Keyword.get(opts, :system),
-      parent_id: step.parent_id || Keyword.get(opts, :parent_id),
-      metadata: Map.merge(step.metadata, Keyword.get(opts, :metadata, %{}))
-    )
+    step
+    |> session_options(opts)
+    |> Keyword.put(:messages, [%Message{role: :user, content: prompt}])
+    |> State.new()
   end
 
   def to_session(%__MODULE__{} = step, opts) do
-    Pi.Agent.session(
+    step
+    |> session_options(opts)
+    |> Keyword.put(:messages, step.messages || Keyword.get(opts, :messages, []))
+    |> State.new()
+  end
+
+  defp session_options(step, opts) do
+    [
       name: step.name || Keyword.get(opts, :name),
       system: step.system || Keyword.get(opts, :system),
-      messages: step.messages || Keyword.get(opts, :messages, []),
       parent_id: step.parent_id || Keyword.get(opts, :parent_id),
       metadata: Map.merge(step.metadata, Keyword.get(opts, :metadata, %{}))
-    )
+    ]
   end
 end

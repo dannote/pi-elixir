@@ -34,11 +34,14 @@ const requiredFiles = [
   'packages/extension/skills/elixir-new-project/SKILL.md',
   'packages/bridge/mix.exs',
   'packages/bridge/README.md',
+  'packages/bridge/docs/architecture.md',
   'packages/bridge/docs/protocol.md',
   'packages/bridge/lib/pi/session.ex',
   'packages/bridge/lib/pi/session/worker.ex',
   'packages/bridge/lib/pi/transport/stdio.ex',
-  'packages/bridge/priv/target/bootstrap.exs'
+  'packages/bridge/priv/target/bootstrap.exs',
+  'packages/bridge/priv/target/runtime/manifest.ex',
+  'packages/bridge/priv/target/runtime/worker.ex'
 ] as const
 
 const forbiddenPatterns = [

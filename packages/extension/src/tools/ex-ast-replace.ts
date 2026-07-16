@@ -51,16 +51,24 @@ export function register(pi: ExtensionAPI) {
     'elixir_ast_replace',
     'ex_ast_replace',
     'ast edit',
-    `Rewrite Elixir source by AST pattern. Prefer this over regex/text replacement for structural changes and broad refactors. Captures are substituted into the replacement by name. ExAST runs in pi-elixir's isolated bridge; the target project needs no dependency.
+    `Rewrite Elixir source with ExAST patterns—not ast-grep patterns.
+
+CRITICAL SYNTAX: patterns and replacements must be valid Elixir. Never use ast-grep metavariables such as $NAME or $$$ARGS. Lowercase Elixir variables capture nodes, _ is a non-capturing wildcard, and the literal Elixir form ... matches zero or more nodes. Captures are substituted into the replacement by their lowercase variable names. ExAST runs in pi-elixir's isolated bridge; the target project needs no dependency.
+
+Conversion: ast-grep foo($FIRST, $$$REST) → ExAST foo(first, ...).
 
 Examples:
 - pattern: 'IO.inspect(expr, _)' replacement: 'Logger.debug(inspect(expr))'
 - pattern: 'dbg(expr)' replacement: 'expr'
 - pattern: '%Step{id: "subject"}' replacement: 'SharedSteps.subject_step(@opts)'`,
     Type.Object({
-      pattern: Type.String({ description: 'Elixir AST pattern to match' }),
+      pattern: Type.String({
+        description:
+          'Valid Elixir ExAST pattern. Use lowercase variables and ...; never use $NAME or $$$ARGS.'
+      }),
       replacement: Type.String({
-        description: 'Replacement template (use capture names from pattern)'
+        description:
+          'Valid Elixir replacement using lowercase capture names from the pattern; never $ metavariables.'
       }),
       path: Type.Optional(Type.String({ description: 'Path to replace in (default: lib/)' })),
       inside: Type.Optional(Type.String({ description: 'Only replace inside this AST pattern' })),

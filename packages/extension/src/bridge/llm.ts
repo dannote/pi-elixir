@@ -1,6 +1,6 @@
 import { recordDiagnostic, withDiagnosticSpan } from '#src/diagnostics.ts'
 import type { BridgeRequestResponder } from '#src/embedded/stdio-process.ts'
-import type { StdioMessage } from '#src/protocol/types.ts'
+import type { BridgeRequestMessage } from '#src/protocol/types.ts'
 import {
   complete,
   stream,
@@ -17,7 +17,7 @@ interface BridgeLLMMessage {
   content?: unknown
 }
 
-function bridgeMessages(message: StdioMessage): BridgeLLMMessage[] {
+function bridgeMessages(message: BridgeRequestMessage): BridgeLLMMessage[] {
   const messages = message.payload?.messages
   return Array.isArray(messages) ? (messages as BridgeLLMMessage[]) : []
 }
@@ -97,7 +97,7 @@ function assistantResult(message: AssistantMessage): Record<string, unknown> {
   }
 }
 
-async function resolveLLMRequest(ctx: ExtensionContext, message: StdioMessage) {
+async function resolveLLMRequest(ctx: ExtensionContext, message: BridgeRequestMessage) {
   const model = ctx.model
   if (!model) return { ok: false as const, error: 'No active pi model is selected.' }
 
@@ -108,7 +108,7 @@ async function resolveLLMRequest(ctx: ExtensionContext, message: StdioMessage) {
 }
 
 export async function handleLLMComplete(
-  message: StdioMessage,
+  message: BridgeRequestMessage,
   ctx: ExtensionContext,
   _pi: ExtensionAPI
 ): Promise<Record<string, unknown>> {
@@ -138,7 +138,7 @@ export async function handleLLMComplete(
 }
 
 export async function handleLLMStream(
-  message: StdioMessage,
+  message: BridgeRequestMessage,
   ctx: ExtensionContext,
   _pi: ExtensionAPI,
   responder?: BridgeRequestResponder

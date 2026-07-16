@@ -4,17 +4,13 @@ defmodule Pi.Plugin.Supervisor do
   use DynamicSupervisor
 
   alias Pi.Plugin.Worker
+  alias Pi.Supervisor.Install
 
   def start_link(opts \\ []) do
     DynamicSupervisor.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def install do
-    case Process.whereis(__MODULE__) do
-      nil -> start_link([])
-      _pid -> :ok
-    end
-  end
+  def install, do: Install.ensure(__MODULE__)
 
   def start_plugin(module) when is_atom(module) do
     install()

@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.8.2 - 2026-07-10
+
+### Added
+
+- Added an installed npm-artifact smoke that packs, installs, starts the bundled bridge, and evaluates code in the fixture project. Hex package checks now require the target bootstrap, and release-note extraction uses a Markdown AST with regression tests.
+- Added a real BEAM supervision tree for core services, supervised ownership for lazy services, an outbound transport boundary, and an enforceable Reach architecture policy.
+- Added runtime decoding for discriminated stdio messages instead of casting arbitrary parsed JSON to an all-optional TypeScript interface.
+
+### Changed
+
+- Split QuackDB configuration, schema, and resource startup from the mirror plugin, split web-document rendering from the general output renderer, and replaced generated-title/inspected-key heuristics with typed tree metadata.
+- Separated output protocol declarations from built-in implementations while preserving the published `Pi.Output` and `Pi.Output.Renderable` contracts and eliminating the final BEAM dependency cycle.
+- Target-runtime source now lives as one manifest-driven bundle under application `priv` and resolves through `Application.app_dir/2` instead of duplicated file lists and a compile-time absolute source root.
+- The publish workflow now publishes HexDocs and creates the matching GitHub Release from the canonical changelog section.
+
+### Fixed
+
+- Hex packages now include `priv/target/bootstrap.exs` and other runtime files required by target eval.
+- Embedded stdio exits cleanly when its owning process closes stdin instead of leaving an orphaned `mix run --no-halt` VM.
+- Elixir AST tools now explicitly distinguish valid-Elixir ExAST syntax from ast-grep syntax and reject `$NAME`/`$$$ARGS` patterns with actionable guidance before dispatch.
+- QuackDB initialization is deferred until its first event, hook, or command so optional mirror startup cannot block the bridge ready handshake. Malformed integer settings fall back safely, and automatic ports are selected from an available loopback socket.
+
 ## 0.8.1 - 2026-07-10
 
 ### Fixed

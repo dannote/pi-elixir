@@ -2,9 +2,12 @@ import { execSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import path from 'node:path'
 
+import { getUnavailableReason } from '#src/connection/status.ts'
 import {
   callEmbeddedTool,
+  embeddedStartupTranscript,
   getBridgeInfo,
+  hasEmbeddedFailed,
   isEmbeddedReady,
   startEmbeddedInBackground,
   stopEmbedded
@@ -68,7 +71,7 @@ function waitForReady(cwd: string, timeout = STARTUP_TIMEOUT): Promise<void> {
         const info = getBridgeInfo(cwd)
         reject(
           new Error(
-            `Timed out waiting for embedded stdio process; bridge info: ${JSON.stringify(info ?? null)}`
+            `Timed out waiting for embedded stdio process; bridge info: ${JSON.stringify(info ?? null)}; failed: ${hasEmbeddedFailed(cwd)}; unavailable: ${getUnavailableReason(cwd) ?? 'none'}; startup: ${embeddedStartupTranscript(cwd) ?? 'none'}`
           )
         )
         return
@@ -90,12 +93,14 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
     const originalComplete = process.env.PI_TEST_LLM_COMPLETE_RESPONSE
     const originalStream = process.env.PI_TEST_LLM_STREAM_RESPONSE
     const originalBridgeMixEnv = process.env.PI_ELIXIR_BRIDGE_MIX_ENV
+    const originalMirror = process.env.PI_ELIXIR_MIRROR
 
     beforeAll(async () => {
       ensureCompiledProject()
       process.env.PI_TEST_LLM_COMPLETE_RESPONSE = 'extension fake completion'
       process.env.PI_TEST_LLM_STREAM_RESPONSE = 'stream |from |extension'
       process.env.PI_ELIXIR_BRIDGE_MIX_ENV = 'test'
+      process.env.PI_ELIXIR_MIRROR = '0'
       startEmbeddedInBackground(PROJECT_DIR)
       await waitForReady(PROJECT_DIR, STARTUP_TIMEOUT)
     }, HOOK_TIMEOUT)
@@ -109,6 +114,9 @@ describe.skipIf(!elixirAvailable || !projectAvailable)(
 
       if (originalBridgeMixEnv === undefined) delete process.env.PI_ELIXIR_BRIDGE_MIX_ENV
       else process.env.PI_ELIXIR_BRIDGE_MIX_ENV = originalBridgeMixEnv
+
+      if (originalMirror === undefined) delete process.env.PI_ELIXIR_MIRROR
+      else process.env.PI_ELIXIR_MIRROR = originalMirror
 
       stopEmbedded(PROJECT_DIR)
     })

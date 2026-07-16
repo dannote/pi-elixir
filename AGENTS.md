@@ -9,17 +9,14 @@ Larger feature planning for this project happens in an internal repo. If you hav
 When releasing a new tagged version:
 
 1. Bump all package versions together and update `CHANGELOG.md`.
-   - Root `package.json` version and `packages/bridge/mix.exs` `:pi_bridge` version must match exactly.
-   - The extension intentionally installs/checks an exact Hex dependency such as `{:pi_bridge, "== X.Y.Z", only: :dev}`.
+   - Root `package.json`, `packages/extension/package.json`, and `packages/bridge/mix.exs` versions must match exactly.
 2. Run `pnpm run check`.
-   - This includes JS checks, BEAM `mix ci`, Hex package build validation, npm pack validation, and a version-alignment guard.
+   - This includes JS checks, BEAM `mix ci`, integration tests, changelog release-note validation, Hex/npm package validation, an installed npm artifact smoke, and version alignment.
 3. Commit the bump, tag `vX.Y.Z`, and push the commit and tag.
-4. Confirm the Publish GitHub Actions workflow succeeds and publishes both:
-   - `pi_bridge` to Hex.
+4. Confirm the Publish GitHub Actions workflow succeeds and publishes:
+   - `pi_bridge` and its documentation to Hex/HexDocs.
    - `pi-elixir` to npm.
-5. Manually create the GitHub Release for the tag with release notes from `CHANGELOG.md`.
-
-The current publish workflow publishes npm and Hex packages, but it does not create GitHub Releases automatically.
+   - The GitHub Release with notes extracted from the matching `CHANGELOG.md` section.
 
 ## Local dogfooding
 
@@ -58,7 +55,7 @@ From the repo root, the extension should resolve the nested Mix project at `pack
 
 ```bash
 cd packages/bridge
-mix run --no-halt -e 'Pi.Transport.Stdio.start()'
+mix run -e 'Pi.Transport.Stdio.start()'
 ```
 
 ## Checks and integration tests

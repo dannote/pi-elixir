@@ -4,15 +4,11 @@ defmodule Pi.Eval.Evaluator do
   use GenServer
 
   alias Pi.Bridge.Info
-  alias Pi.Eval.{Diagnostics, ExceptionInfo, Snapshot}
+  alias Pi.Eval.{Context, Diagnostics, ExceptionInfo, Snapshot}
   alias Pi.Eval.Output, as: EvalOutput
   alias Pi.Output
   alias Pi.Protocol.Tool.Eval, as: EvalPayload
   alias Pi.Protocol.Tool.OutputPart
-
-  @control_key {Pi.Eval, :control}
-  @binding_info_key {Pi.Eval, :binding_info}
-  @session_id_key {Pi.Eval, :session_id}
 
   defstruct session_id: nil,
             binding: [],
@@ -136,9 +132,7 @@ defmodule Pi.Eval.Evaluator do
   end
 
   defp eval_code(code, state) do
-    Process.put(@session_id_key, state.session_id)
-    Process.put(@binding_info_key, Snapshot.binding_info(state.binding))
-    Process.delete(@control_key)
+    Context.prepare(state.session_id, Snapshot.binding_info(state.binding))
 
     {result, diagnostics} =
       Code.with_diagnostics([log: false], fn ->
@@ -165,8 +159,7 @@ defmodule Pi.Eval.Evaluator do
     {success?, value, next_state} = result
     {success?, value, next_state, diagnostics}
   after
-    Process.delete(@session_id_key)
-    Process.delete(@binding_info_key)
+    Context.clear()
   end
 
   defp structured_result(
@@ -249,7 +242,7 @@ defmodule Pi.Eval.Evaluator do
   end
 
   defp apply_control(state) do
-    case Process.get(@control_key) do
+    case Context.take_control() do
       :reset -> %{state | binding: [], env: initial_env()}
       {:forget, names} -> forget_names(state, names)
       _other -> state
@@ -317,13 +310,4 @@ defmodule Pi.Eval.Evaluator do
 
   defp eval_file(session_id), do: "pi://eval/" <> session_id
   defp via(session_id), do: {:via, Registry, {Pi.Eval.Registry, session_id}}
-
-  @doc false
-  def current_session_id, do: Process.get(@session_id_key)
-
-  @doc false
-  def current_binding_info, do: Process.get(@binding_info_key, [])
-
-  @doc false
-  def put_control(control), do: Process.put(@control_key, control)
 end

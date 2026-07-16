@@ -10,4 +10,12 @@ defmodule Pi.OutputTest do
 
     assert %Pi.Output{} = Pi.Output.tree(value)
   end
+
+  test "published output dispatch helpers retain their return contract" do
+    value = [%{name: "alpha", count: 1}]
+
+    assert %Pi.Output{parts: parts} = output = Pi.Output.output(value)
+    assert Pi.Output.auto(output) == output
+    assert Pi.Output.parts_for(value) == parts
+  end
 end

@@ -7,11 +7,16 @@ defmodule Pi.Session.Supervisor do
 
   def start_link(opts \\ []), do: Install.start_link(__MODULE__, opts)
 
-  def install, do: Install.dynamic(__MODULE__)
+  def install, do: Install.ensure(__MODULE__)
 
   def start_session(opts) when is_list(opts) do
     install()
     DynamicSupervisor.start_child(__MODULE__, {Pi.Session.Worker, opts})
+  end
+
+  @doc false
+  def reset do
+    with :ok <- install(), do: Install.reset_dynamic(__MODULE__)
   end
 
   def workers do

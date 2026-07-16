@@ -13,8 +13,7 @@ defmodule Pi.Target.AttachedTest do
   end
 
   setup do
-    if pid = Process.whereis(Attached), do: GenServer.stop(pid)
-    :ok
+    :ok = Attached.reset()
   end
 
   test "observes pre-existing runtime state and keeps attached bindings", %{node: node} do

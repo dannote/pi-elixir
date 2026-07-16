@@ -34,14 +34,20 @@ defmodule Pi.Output do
 
   @doc "Wraps any value as a tree output."
   def tree(value, opts \\ []) do
-    preview = Keyword.get(opts, :preview) || tree_preview(value)
+    custom_preview = Keyword.get(opts, :preview)
+    preview = custom_preview || tree_preview(value)
 
     %__MODULE__{
       parts: [
         OutputPart.tree(
           encode_output_payload(tree_value(value, 0, Keyword.get(opts, :depth, 4))),
           title: preview,
-          data: %{inspect_preview: inspect(value, compact_inspect_opts(opts))}
+          data: %{
+            inspect_preview: inspect(value, compact_inspect_opts(opts)),
+            container_kind: container_kind(value),
+            container_size: container_size(value),
+            title_kind: if(custom_preview, do: :custom, else: :generated)
+          }
         )
       ],
       text: inspect(value, inspect_opts())
@@ -78,7 +84,7 @@ defmodule Pi.Output do
 
   @doc "Converts a value to structured output when a renderer is available."
   def output(value, opts \\ []) do
-    case Renderable.to_output(value, opts) do
+    case auto(value, opts) do
       %__MODULE__{} = output -> output
       nil -> text(inspect(value, inspect_opts()), opts)
     end
@@ -238,6 +244,15 @@ defmodule Pi.Output do
   defp tree_key(key), do: inspect(key)
 
   defp table_preview(rows, columns), do: "#{rows} rows × #{columns} columns"
+
+  defp container_kind(value) when is_map(value), do: :map
+  defp container_kind(value) when is_list(value), do: :list
+  defp container_kind(_value), do: :term
+
+  defp container_size(value) when is_map(value), do: map_size(value)
+  defp container_size(value) when is_list(value), do: length(value)
+  defp container_size(_value), do: nil
+
   defp tree_preview(value) when is_map(value), do: "map with #{map_size(value)} keys"
   defp tree_preview(value) when is_list(value), do: "list with #{length(value)} items"
   defp tree_preview(_value), do: "tree"

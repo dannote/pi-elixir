@@ -4,13 +4,14 @@ defmodule PiBridge.MixProject do
   def project do
     [
       app: :pi_bridge,
-      version: "0.8.1",
+      version: "0.8.2",
       elixir: "~> 1.16",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       description: "BEAM runtime bridge for pi development agents",
       package: package(),
       source_url: "https://github.com/elixir-vibe/pi-elixir",
-      docs: [main: "readme", extras: ["README.md", "docs/protocol.md"]],
+      docs: [main: "readme", extras: ["README.md", "docs/architecture.md", "docs/protocol.md"]],
       elixirc_options: [
         no_warn_undefined: [
           {Dune, :eval_string, 2},
@@ -32,8 +33,10 @@ defmodule PiBridge.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger]]
+    [mod: {Pi.Application, []}, extra_applications: [:logger]]
   end
+
+  defp elixirc_paths(_env), do: ["lib", "priv/target/runtime"]
 
   defp aliases do
     [
@@ -53,7 +56,7 @@ defmodule PiBridge.MixProject do
     [
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/elixir-vibe/pi-elixir"},
-      files: ~w[lib docs mix.exs README.md]
+      files: ~w[lib priv docs mix.exs README.md]
     ]
   end
 

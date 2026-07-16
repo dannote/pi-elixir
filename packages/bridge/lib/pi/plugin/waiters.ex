@@ -3,16 +3,13 @@ defmodule Pi.Plugin.Waiters do
 
   use GenServer
 
+  alias Pi.Supervisor.Install
+
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def install do
-    case GenServer.whereis(__MODULE__) do
-      nil -> GenServer.start_link(__MODULE__, [], name: __MODULE__)
-      _pid -> :ok
-    end
-  end
+  def install, do: Install.ensure(__MODULE__)
 
   @impl true
   def init(_opts), do: {:ok, %{tables: MapSet.new()}}

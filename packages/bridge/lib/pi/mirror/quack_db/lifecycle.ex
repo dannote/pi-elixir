@@ -3,7 +3,8 @@ defmodule Pi.Mirror.QuackDB.Lifecycle do
 
   use GenServer
 
-  alias Pi.Mirror.QuackDB, as: Mirror
+  alias Pi.Mirror.QuackDB.Resources
+  alias Pi.Supervisor.Install
 
   def ensure_started do
     with {:ok, pid} <- ensure_process(), do: GenServer.call(pid, :ensure_started, 30_000)
@@ -25,10 +26,13 @@ defmodule Pi.Mirror.QuackDB.Lifecycle do
     :exit, _reason -> :ok
   end
 
-  def start_link(_opts \\ []), do: GenServer.start(__MODULE__, %{}, name: __MODULE__)
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
   @impl true
-  def init(state), do: {:ok, state}
+  def init(state) do
+    Process.flag(:trap_exit, true)
+    {:ok, state}
+  end
 
   @impl true
   def handle_call(:ensure_started, _from, %{resources: resources} = state) do
@@ -48,6 +52,16 @@ defmodule Pi.Mirror.QuackDB.Lifecycle do
   def handle_call(:status, _from, state), do: {:reply, %{status: :stopped}, state}
 
   @impl true
+  def handle_info(
+        {:EXIT, supervisor, reason},
+        %{resources: %{supervisor: supervisor}} = state
+      ) do
+    {:noreply, state |> Map.delete(:resources) |> Map.put(:error, reason)}
+  end
+
+  def handle_info(_message, state), do: {:noreply, state}
+
+  @impl true
   def terminate(_reason, %{resources: %{supervisor: supervisor}}) do
     if Process.alive?(supervisor), do: Supervisor.stop(supervisor)
     :ok
@@ -58,7 +72,7 @@ defmodule Pi.Mirror.QuackDB.Lifecycle do
   def terminate(_reason, _state), do: :ok
 
   defp start_resources(state) do
-    case Mirror.start_mirror_resources() do
+    case Resources.start() do
       {:ok, resources} -> {:reply, {:ok, resources}, Map.put(state, :resources, resources)}
       {:error, reason} -> {:reply, {:error, reason}, Map.put(state, :error, reason)}
     end
@@ -77,16 +91,12 @@ defmodule Pi.Mirror.QuackDB.Lifecycle do
   end
 
   defp ensure_process do
-    case Process.whereis(__MODULE__) do
-      nil ->
-        case start_link([]) do
-          {:ok, pid} -> {:ok, pid}
-          {:error, {:already_started, pid}} -> {:ok, pid}
-          error -> error
-        end
-
-      pid ->
-        {:ok, pid}
+    with :ok <- Install.ensure(__MODULE__),
+         pid when is_pid(pid) <- Process.whereis(__MODULE__) do
+      {:ok, pid}
+    else
+      nil -> {:error, :lifecycle_not_started}
+      error -> error
     end
   end
 end

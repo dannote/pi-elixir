@@ -1,6 +1,29 @@
 defmodule Pi.ASTTest do
   use ExUnit.Case, async: false
 
+  test "rejects ast-grep metavariables with ExAST syntax guidance" do
+    assert {:error, search_error} = Pi.AST.search("$MODULE.__rustq_asts__()")
+    assert search_error =~ "valid Elixir, not ast-grep"
+    assert search_error =~ "Never use $NAME or $$$ARGS"
+
+    assert {:error, named_error} =
+             Pi.AST.search_many(%{"render_calls" => "Render.$FUN($$$ARGS)"})
+
+    assert named_error =~ "Named pattern render_calls"
+    assert named_error =~ "lowercase variables"
+
+    assert {:error, replace_error} = Pi.AST.replace("raw_arm!($EXPR)", "raw_arm!(expr)")
+    assert replace_error =~ "Invalid ExAST pattern"
+  end
+
+  test "accepts lowercase captures and ellipsis as valid ExAST syntax" do
+    assert {:ok, result} = Pi.AST.search("module.__rustq_asts__()", path: "test")
+    assert result.pattern == "module.__rustq_asts__()"
+
+    assert {:ok, result} = Pi.AST.search("foo(first, ...)", path: "test")
+    assert result.pattern == "foo(first, ...)"
+  end
+
   test "diff compares a changed file against git HEAD" do
     in_git_repo(fn ->
       File.mkdir_p!("lib")

@@ -3,35 +3,28 @@ defmodule Pi.Eval.Supervisor do
 
   use DynamicSupervisor
 
+  alias Pi.Supervisor.Install
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     DynamicSupervisor.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @spec install() :: :ok | {:ok, pid()} | {:error, term()}
+  @spec install() :: :ok | {:error, :eval_runtime_not_started}
   def install do
-    install_registry()
-
-    case Process.whereis(__MODULE__) do
-      nil ->
-        case start_link([]) do
-          {:ok, pid} ->
-            Process.unlink(pid)
-            {:ok, pid}
-
-          other ->
-            other
-        end
-
-      _pid ->
-        :ok
-    end
+    if Process.whereis(__MODULE__) && Process.whereis(Pi.Eval.Registry),
+      do: :ok,
+      else: {:error, :eval_runtime_not_started}
   end
 
   @spec evaluator(String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
   def evaluator(session_id, opts \\ []) when is_binary(session_id) do
-    install()
+    with :ok <- install() do
+      lookup_evaluator(session_id, opts)
+    end
+  end
 
+  defp lookup_evaluator(session_id, opts) do
     case Registry.lookup(Pi.Eval.Registry, session_id) do
       [{pid, _value}] when is_pid(pid) ->
         {:ok, pid}
@@ -42,20 +35,9 @@ defmodule Pi.Eval.Supervisor do
     end
   end
 
+  @doc false
+  def reset, do: Install.reset_dynamic(__MODULE__)
+
   @impl true
   def init(_opts), do: DynamicSupervisor.init(strategy: :one_for_one)
-
-  defp install_registry do
-    case Process.whereis(Pi.Eval.Registry) do
-      nil ->
-        case Registry.start_link(keys: :unique, name: Pi.Eval.Registry) do
-          {:ok, pid} -> Process.unlink(pid)
-          {:error, {:already_started, _pid}} -> :ok
-          {:error, _reason} -> :ok
-        end
-
-      _pid ->
-        :ok
-    end
-  end
 end

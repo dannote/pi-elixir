@@ -7,18 +7,18 @@ defmodule Pi.Agent.JobSupervisor do
 
   def start_link(opts \\ []), do: Install.start_link(__MODULE__, opts)
 
-  def install, do: Install.dynamic(__MODULE__)
+  def install, do: Install.ensure(__MODULE__)
 
   def start_job(job, opts) do
-    install()
-
-    DynamicSupervisor.start_child(
-      __MODULE__,
-      Supervisor.child_spec({Pi.Agent.Job, {job, opts}},
-        id: {Pi.Agent.Job, job.id},
-        restart: :temporary
+    with :ok <- install() do
+      DynamicSupervisor.start_child(
+        __MODULE__,
+        Supervisor.child_spec({Pi.Agent.Job, {job, opts}},
+          id: {Pi.Agent.Job, job.id},
+          restart: :temporary
+        )
       )
-    )
+    end
   end
 
   @impl true

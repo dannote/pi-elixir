@@ -49,6 +49,15 @@ Reserve shell for tools with no BEAM equivalent or where the native CLI is the p
 
 For Elixir source, use AST tools whenever the question is about code shape. Do not default to `rg` for callback implementations, function calls, structs, maps, tuples, pipelines, guards, macros, or refactor targets.
 
+ExAST is **not ast-grep**. Every pattern must parse as valid Elixir:
+
+- capture one node with an ordinary lowercase variable such as `module`, `expr`, or `kind`;
+- match one node without capturing it with `_`;
+- match zero or more arguments/statements with the literal Elixir form `...`;
+- never use ast-grep syntax such as `$MODULE`, `$EXPR`, or `$$$ARGS`.
+
+For example, write `module.__rustq_asts__()` instead of `$MODULE.__rustq_asts__()`, and `foo(first, ...)` instead of `foo($FIRST, $$$REST)`.
+
 Use `elixir_ast_search` for patterns like:
 
 ```elixir
