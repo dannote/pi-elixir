@@ -423,10 +423,15 @@ function compactHighlightedPreview(part: OutputPart, theme: Theme): string | nul
   return line ?? null
 }
 
+function compactInspectPreview(part: OutputPart) {
+  const preview = partPreview(part)
+  return highlightCode(preview, part.language ?? 'elixir')[0] ?? preview
+}
+
 function compactPartPreview(part: OutputPart, index: number, theme: Theme) {
   const text =
     part.kind === 'inspect'
-      ? partPreview(part)
+      ? compactInspectPreview(part)
       : (compactHighlightedPreview(part, theme) ?? partPreview(part))
   const styled = part.kind === 'text' && index === 0 ? theme.fg('toolOutput', text) : text
   return index === 0 ? styled : theme.fg('muted', ` ↳ ${text}`)

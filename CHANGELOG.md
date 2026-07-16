@@ -21,6 +21,7 @@
 
 - Hex packages now include `priv/target/bootstrap.exs` and other runtime files required by target eval.
 - Embedded stdio exits cleanly when its owning process closes stdin instead of leaving an orphaned `mix run --no-halt` VM.
+- Compact eval previews retain Elixir syntax highlighting before width truncation, and release-note validation distinguishes branch CI runs from version tags.
 - Elixir AST tools now explicitly distinguish valid-Elixir ExAST syntax from ast-grep syntax and reject `$NAME`/`$$$ARGS` patterns with actionable guidance before dispatch.
 - QuackDB initialization is deferred until its first event, hook, or command so optional mirror startup cannot block the bridge ready handshake. Malformed integer settings fall back safely, and automatic ports are selected from an available loopback socket.
 

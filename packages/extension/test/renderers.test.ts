@@ -3,12 +3,17 @@ import type { AgentToolResult, Theme } from '@earendil-works/pi-coding-agent'
 import { visibleWidth, type Component } from '@earendil-works/pi-tui'
 import { describe, expect, it, vi } from 'vitest'
 
-const { identity } = vi.hoisted(() => ({ identity: (text: string) => text }))
+const { highlightCodeOverride, identity } = vi.hoisted(() => ({
+  highlightCodeOverride: vi.fn(),
+  identity: (text: string) => text
+}))
 
 vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
   const original = await importOriginal<typeof PiCodingAgent>()
   return {
     ...original,
+    highlightCode: (text: string, language: string) =>
+      highlightCodeOverride(text, language) ?? original.highlightCode(text, language),
     keyHint: (_id: string, label: string) => `ctrl+o ${label}`,
     getMarkdownTheme: () => ({
       heading: identity,
@@ -145,6 +150,28 @@ describe('elixir result rendering', () => {
     expect(compact).toBe('\n%{bridge: "0.6.0", app: :pi_bridge}')
     expect(compact).not.toContain('to expand')
     expect(compact).not.toContain('✓')
+  })
+
+  it('syntax-highlights compact inspect previews before terminal truncation', () => {
+    const title = '%{manifest_entries: 93, chunks: 1}'
+    highlightCodeOverride.mockReturnValueOnce([`<highlighted>${title}</highlighted>`])
+    const result = evalResult({
+      result: '%{\n  manifest_entries: 93,\n  chunks: 1\n}',
+      parts: [
+        {
+          kind: 'inspect',
+          body: '%{\n  manifest_entries: 93,\n  chunks: 1\n}',
+          title,
+          language: 'elixir'
+        }
+      ]
+    })
+
+    const compact = textOf(renderElixirResult(result, { expanded: false, isPartial: false }, theme))
+
+    expect(highlightCodeOverride).toHaveBeenCalledWith(title, 'elixir')
+    expect(compact).toContain(`<highlighted>${title}</highlighted>`)
+    highlightCodeOverride.mockReset()
   })
 
   it('uses the one-line inspect title instead of the first pretty-printed line', () => {

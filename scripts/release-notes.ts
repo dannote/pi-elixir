@@ -33,6 +33,16 @@ export function extractReleaseNotes(markdown: string, version: string): string {
   return `${notes}\n`;
 }
 
+export function validateReleaseRef(
+  version: string,
+  refType: string | undefined,
+  refName: string | undefined,
+): void {
+  if (refType === "tag" && refName !== `v${version}`) {
+    throw new Error(`Tag ${refName ?? ""} does not match package version ${version}`);
+  }
+}
+
 async function main(): Promise<void> {
   const root = process.cwd();
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")) as {
@@ -43,10 +53,7 @@ async function main(): Promise<void> {
   }
 
   const expectedTag = `v${packageJson.version}`;
-  const tag = process.env.GITHUB_REF_NAME;
-  if (tag && tag !== expectedTag) {
-    throw new Error(`Tag ${tag} does not match package version ${packageJson.version}`);
-  }
+  validateReleaseRef(packageJson.version, process.env.GITHUB_REF_TYPE, process.env.GITHUB_REF_NAME);
 
   const changelog = await readFile(path.join(root, "CHANGELOG.md"), "utf8");
   const notes = extractReleaseNotes(changelog, packageJson.version);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { extractReleaseNotes } from "./release-notes.ts";
+import { extractReleaseNotes, validateReleaseRef } from "./release-notes.ts";
 
 test("extracts one version section using Markdown heading boundaries", () => {
   const changelog = `# Changelog
@@ -20,6 +20,15 @@ test("extracts one version section using Markdown heading boundaries", () => {
 `;
 
   assert.equal(extractReleaseNotes(changelog, "1.2.3"), "### Fixed\n\n- Kept exact wording.\n");
+});
+
+test("accepts branch CI refs and validates release tags", () => {
+  assert.doesNotThrow(() => validateReleaseRef("1.2.3", "branch", "master"));
+  assert.doesNotThrow(() => validateReleaseRef("1.2.3", "tag", "v1.2.3"));
+  assert.throws(
+    () => validateReleaseRef("1.2.3", "tag", "v1.2.2"),
+    /does not match package version/u,
+  );
 });
 
 test("does not confuse a version with a longer version prefix", () => {
